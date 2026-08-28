@@ -16,7 +16,6 @@ Guardian/
 │       └── utils/
 │
 ├── .env
-├── .env.example
 ├── pyproject.toml
 ├── uv.lock
 └── README.md
