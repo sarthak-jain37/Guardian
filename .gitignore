@@ -20,3 +20,8 @@
 
 .DS_Store
 Thumbs.db
+
+
+# YAML files
+
+*.yaml
