@@ -10,12 +10,11 @@ logger = logging.getLogger(__name__)
 async def run_pipeline(redis, k8s: KubernetesService):
     while True:
         try:
-            logger.info("Checking audit logs...")
+            logger.info("Checking audit logs")
             data = collect_audit_logs()
-            logger.info("Processing events...")
+            logger.info("Processing events")
             await process_events(data, redis, k8s)
 
         except Exception:
             logger.exception("Worker error")
-            
-        await asyncio.sleep(POLLING_INTERVAL)
+        await asyncio.sleep(int(POLLING_INTERVAL))

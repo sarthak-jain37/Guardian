@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -8,6 +9,11 @@ from backend.app.services.kubernetes_service import KubernetesService
 from backend.app.api.routes.output import router as output_router
 from backend.app.workers.worker import run_pipeline
 from backend.app.core.config import REDIS_URL
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s: %(message)s - %(name)s - %(asctime)s ",
+)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
