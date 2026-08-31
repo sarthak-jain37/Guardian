@@ -1,17 +1,21 @@
 import asyncio
+import logging
 from backend.app.services.audit_collector import collect_audit_logs
 from backend.app.services.event_processor import process_events
+from backend.app.services.kubernetes_service import KubernetesService
 from backend.app.core.config import POLLING_INTERVAL
 
-async def run_pipeline(redis):
+logger = logging.getLogger(__name__)
+
+async def run_pipeline(redis, k8s: KubernetesService):
     while True:
         try:
-            print("Checking audit logs...")
-
+            logger.info("Checking audit logs...")
             data = collect_audit_logs()
-            await process_events(data, redis)
+            logger.info("Processing events...")
+            await process_events(data, redis, k8s)
 
-        except Exception as e:
-            print(f"Worker error: {e}")
+        except Exception:
+            logger.exception("Worker error")
             
         await asyncio.sleep(POLLING_INTERVAL)

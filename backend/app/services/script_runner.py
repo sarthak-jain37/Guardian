@@ -1,18 +1,14 @@
+from backend.app.services.kubernetes_service import KubernetesService
 from scripts.apply_script import run_apply
 from scripts.modify_script import run_modify
+import logging
 
-class ScriptResult:
-    def __init__(self, status_code):
-        self.status_code = status_code
+logger = logging.getLogger(__name__)
 
-def run_apply_script():
-    print("Executing APPLY SCRIPT...")
-    success = run_apply()
-    status = 200 if success else 500
-    return ScriptResult(status)
+def run_apply_script(k8s: KubernetesService) -> None:
+    logger.info("Executing APPLY SCRIPT...")
+    run_apply(k8s)
 
-def run_modify_script():
-    print("Executing MODIFY SCRIPT...")
-    success = run_modify()
-    status = 200 if success else 500
-    return ScriptResult(status)
+def run_modify_script(k8s: KubernetesService):
+    logger.info("Executing MODIFY SCRIPT...")
+    run_modify(k8s)
