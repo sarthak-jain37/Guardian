@@ -25,3 +25,7 @@ Thumbs.db
 # YAML files
 
 *.yaml
+
+# JSON files
+
+*.json
