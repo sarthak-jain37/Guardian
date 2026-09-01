@@ -1,11 +1,13 @@
 # Python
 
-**pycache**/
+**/__pycache__/**
 *.py[cod]
 
 # Virtual environment
 
 .venv/
+venv/*
+venv
 
 # Environment variables / secrets
 
@@ -25,3 +27,7 @@ Thumbs.db
 # YAML files
 
 *.yaml
+
+# JSON files
+
+*.json
