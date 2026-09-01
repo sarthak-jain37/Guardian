@@ -1,4 +1,24 @@
+# Python
+
+**/__pycache__/**
+*.py[cod]
+
+# Virtual environment
+
+.venv/
 venv/*
 venv
+
+# Environment variables / secrets
+
 .env
-**/__pycache__/*
+
+# Editor files
+
+.vscode/
+.idea/
+
+# OS files
+
+.DS_Store
+Thumbs.db
