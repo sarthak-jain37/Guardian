@@ -1,3 +1,4 @@
+from agents.summarizer import analyse_document
 from backend.app.services.kubernetes_service import KubernetesService
 from backend.app.services.script_runner import run_apply_script, run_modify_script
 from backend.app.services.redis_service import get_last_processed_timestamp, get_rbac_state, save_drift_event, save_rbac_state, set_last_processed_timestamp
@@ -45,7 +46,7 @@ async def process_events(data, redis, k8s: KubernetesService) -> None:
         await save_rbac_state(CURRENT_KEY, current, redis)
         
         if diff_dict:
-            llm_response = call_llm(diff_dict)
+            llm_response = analyse_document(diff_dict)
             
             await save_drift_event(diff_dict, llm_response, redis)
         
