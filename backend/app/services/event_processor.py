@@ -1,6 +1,6 @@
 from backend.app.services.kubernetes_service import KubernetesService
 from backend.app.services.script_runner import run_apply_script, run_modify_script
-from backend.app.services.redis_service import get_last_processed_timestamp, set_last_processed_timestamp
+from backend.app.services.redis_service import get_last_processed_timestamp, get_rbac_state, save_drift_event, save_rbac_state, set_last_processed_timestamp
 from backend.app.utils.helpers import get_latest_event_timestamp, parse_timestamp
 
 APPLY_FIELDS = [
@@ -13,6 +13,9 @@ MODIFY_FIELDS = [
     "kubectl-create",
     "kubectl-patch"
 ] 
+
+BASELINE_KEY = "rbac:baseline"
+CURRENT_KEY = "rbac:current"
 
 
 async def process_events(data, redis, k8s: KubernetesService) -> None:
@@ -29,11 +32,21 @@ async def process_events(data, redis, k8s: KubernetesService) -> None:
         last_processed_modify = parse_timestamp(last_processed_modify)
 
     if most_recent_apply and (last_processed_apply is None or most_recent_apply > last_processed_apply):
-        run_apply_script(k8s)
-
+        baseline = run_apply_script(k8s)
+        
+        await save_rbac_state(BASELINE_KEY, baseline, redis)
         await set_last_processed_timestamp( "apply", most_recent_apply.isoformat(), redis)
         
     if most_recent_modify and (last_processed_modify is None or most_recent_modify > last_processed_modify):
-        run_modify_script(k8s)
+        baseline = await get_rbac_state(BASELINE_KEY, redis)
+        
+        current, diff_dict = run_modify_script(k8s, baseline)
+        
+        await save_rbac_state(CURRENT_KEY, current, redis)
+        
+        if diff_dict:
+            llm_response = call_llm(diff_dict)
+            
+            await save_drift_event(diff_dict, llm_response, redis)
         
         await set_last_processed_timestamp("modify", most_recent_modify.isoformat(), redis)

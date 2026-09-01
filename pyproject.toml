@@ -12,4 +12,5 @@ dependencies = [
     "uvicorn[standard]>=0.52.4",
     "kubernetes>=31.0.0",
     "deepdiff>=8.0.0",
+    "streamlit>=1.62.0",
 ]

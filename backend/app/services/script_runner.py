@@ -5,10 +5,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def run_apply_script(k8s: KubernetesService) -> None:
+def run_apply_script(k8s: KubernetesService):
     logger.info("Executing APPLY SCRIPT...")
-    run_apply(k8s)
+    return run_apply(k8s)
 
-def run_modify_script(k8s: KubernetesService):
+def run_modify_script(k8s: KubernetesService, baseline: dict | None):
     logger.info("Executing MODIFY SCRIPT...")
-    run_modify(k8s)
+    return run_modify(k8s, baseline)
