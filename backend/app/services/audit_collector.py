@@ -96,12 +96,9 @@ class AuditLogSource:
         return events
 
 
-AUDIT_LOG_PATH = os.getenv(
-    "KUBERNETES_AUDIT_LOG_PATH",
-    "audit.log",
-)
+from backend.app.core.config import KUBERNETES_AUDIT_LOG_PATH
 
-audit_source = AuditLogSource(AUDIT_LOG_PATH)
+audit_source = AuditLogSource(KUBERNETES_AUDIT_LOG_PATH)
 
 
 def _is_response_complete(event: dict[str, Any]) -> bool:

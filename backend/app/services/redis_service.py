@@ -7,6 +7,7 @@ LAST_APPLY_KEY = "rbac:last_processed:apply"
 LAST_MODIFY_KEY = "rbac:last_processed:modify"
 
 DRIFT_QUEUE_KEY = "rbac:drift:events"
+DANGEROUS_PERMS_KEY = "rbac:dangerous_permissions"
 
 async def get_last_processed_timestamp(event_type, redis: Redis):
     return await redis.get(f"rbac:last_processed:{event_type}")
@@ -56,4 +57,14 @@ async def get_drift_event(redis, index: int) -> dict | None:
         return None
 
     return json.loads(event)
-    
+
+
+async def save_dangerous_permissions(findings: list[dict], redis: Redis) -> None:
+    await redis.set(DANGEROUS_PERMS_KEY, json.dumps(findings))
+
+
+async def get_dangerous_permissions(redis: Redis) -> list[dict]:
+    data = await redis.get(DANGEROUS_PERMS_KEY)
+    if data is None:
+        return []
+    return json.loads(data)

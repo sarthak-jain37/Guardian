@@ -1,7 +1,15 @@
 from agents.summarizer import analyse_document
 from backend.app.services.kubernetes_service import KubernetesService
+from backend.app.services.permission_scanner import scan_dangerous_permissions
 from backend.app.services.script_runner import run_apply_script, run_modify_script
-from backend.app.services.redis_service import get_last_processed_timestamp, get_rbac_state, save_drift_event, save_rbac_state, set_last_processed_timestamp
+from backend.app.services.redis_service import (
+    get_last_processed_timestamp,
+    get_rbac_state,
+    save_dangerous_permissions,
+    save_drift_event,
+    save_rbac_state,
+    set_last_processed_timestamp,
+)
 from backend.app.utils.helpers import get_latest_event_timestamp, parse_timestamp
 
 APPLY_FIELDS = [
@@ -36,7 +44,11 @@ async def process_events(data, redis, k8s: KubernetesService) -> None:
         baseline = run_apply_script(k8s)
         
         await save_rbac_state(BASELINE_KEY, baseline, redis)
-        await set_last_processed_timestamp( "apply", most_recent_apply.isoformat(), redis)
+        await set_last_processed_timestamp("apply", most_recent_apply.isoformat(), redis)
+
+        # Trigger dangerous permission scan on new baseline apply
+        findings = scan_dangerous_permissions(baseline)
+        await save_dangerous_permissions(findings, redis)
         
     if most_recent_modify and (last_processed_modify is None or most_recent_modify > last_processed_modify):
         baseline = await get_rbac_state(BASELINE_KEY, redis)
@@ -51,3 +63,7 @@ async def process_events(data, redis, k8s: KubernetesService) -> None:
             await save_drift_event(diff_dict, llm_response, redis)
         
         await set_last_processed_timestamp("modify", most_recent_modify.isoformat(), redis)
+
+        # Trigger dangerous permission scan on RBAC modification
+        findings = scan_dangerous_permissions(current)
+        await save_dangerous_permissions(findings, redis)

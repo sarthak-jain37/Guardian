@@ -1,10 +1,11 @@
 import json
 
 from langchain_community.llms import LlamaCpp
+from backend.app.core.config import MODEL_PATH
 
 
 local_qwen = LlamaCpp(
-    model_path="/path/to/qwen2.5-7b-instruct-Q4_K_M.gguf",
+    model_path=MODEL_PATH,
     temperature=0.2,
     verbose=False,
 )
