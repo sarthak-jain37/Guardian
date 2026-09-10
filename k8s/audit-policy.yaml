@@ -1,0 +1,15 @@
+apiVersion: audit.k8s.io/v1
+kind: Policy
+rules:
+  # Log all RBAC changes at Metadata level
+  - level: Metadata
+    resources:
+      - group: "rbac.authorization.k8s.io"
+        resources: ["roles", "clusterroles", "rolebindings", "clusterrolebindings"]
+  # Log ServiceAccount changes
+  - level: Metadata
+    resources:
+      - group: ""
+        resources: ["serviceaccounts"]
+  # Don't log everything else (too noisy)
+  - level: None
