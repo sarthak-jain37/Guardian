@@ -1,0 +1,8 @@
+# Metadata-level only: no request/response bodies anywhere (Secrets included).
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages: ["RequestReceived"]          # keep ResponseStarted (watch/exec) + ResponseComplete
+rules:
+  # Don't add `level: None` rules for ServiceAccounts: they silently punch holes in coverage.
+  # (The collector flags such rules and downgrades coverage to 'partial'.)
+  - level: Metadata
