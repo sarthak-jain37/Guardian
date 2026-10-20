@@ -30,6 +30,13 @@ class ReviewPort(Protocol):
 
 class VerificationPort(Protocol):
     def check(self, evidence: EvidenceBundle, result_rules: list[dict]) -> list[dict]: ...
+    def check_adoption(self, evidence: EvidenceBundle) -> list[dict]: ...
+
+
+class BaselinePort(Protocol):
+    """Backend owns the governed adoption transaction; the graph supplies IDs."""
+    simulation_only: bool
+    def adopt_approved_snapshot(self, proposal_id: str, decision_id: str, action_key: str) -> dict: ...
 
 
 class ExecutionPort(Protocol):

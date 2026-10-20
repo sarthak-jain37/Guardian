@@ -11,7 +11,8 @@ from .contracts import (AnalysisReport, AnalysisRequest, ApprovalDecision, Chang
                         Investigation, Proposal, ReadinessAssessment, utc_now, validate_request_evidence)
 from .policy import (build_facts, canonical_hash, global_gates, render, risk_findings,
                      validate_investigation, validate_plan)
-from .ports import BudgetPort, EvidencePort, ExecutionPort, ModelClient, ReviewPort, VerificationPort
+from .ports import BaselinePort, BudgetPort, EvidencePort, ExecutionPort, ModelClient, ReviewPort, VerificationPort
+from .review import adoption_gates, adoption_proposal, checked_gates
 from .state import GuardianState
 from .versions import GRAPH_VERSION, current_versions, require_compatible_state
 
@@ -25,6 +26,7 @@ class Runtime:
     execution: ExecutionPort
     clock: Callable = utc_now
     budget: BudgetPort | None = None
+    baseline: BaselinePort | None = None
 
 
 def event(state, node, **details):
@@ -38,7 +40,8 @@ def bundle(state):
 def report(state, runtime):
     return AnalysisReport.model_validate({"graph_version": GRAPH_VERSION, "versions": state["versions"],
             "case_id": state["request"]["case_id"], "run_id": state["request"]["run_id"],
-            "mode": state["request"]["mode"], "producer": runtime.model.producer,
+            "mode": state["request"]["mode"],
+            "producer": "deterministic" if state["request"].get("intent") == "adopt_baseline" else runtime.model.producer,
             "status": state.get("status"), "reason": state.get("reason"),
             "facts": state.get("facts", []), "security_risk": state.get("risk", []),
             "investigation": state.get("investigation"), "plan": state.get("plan"),
@@ -82,6 +85,21 @@ def build_graph(runtime: Runtime, checkpointer):
 
     def assess_risk(state):
         return {"risk": risk_findings(bundle(state)), "trace": event(state, "assess_risk")}
+
+    def prepare_adoption(state):
+        e = bundle(state)
+        req = AnalysisRequest.model_validate(state["request"])
+        gates = adoption_gates(e, runtime.verification, runtime.clock())
+        simulation = req.mode == "simulation"
+        transport = simulation and runtime.baseline is not None and runtime.baseline.simulation_only
+        gates.append(Gate(gate_id="adoption_transport", result="pass" if transport else "unknown",
+                          reasons=[] if transport else ["production_governance_unavailable"]))
+        proposal = adoption_proposal(req, e, state["versions"], gates, runtime.clock())
+        ready = proposal.status == "PENDING_APPROVAL"
+        return {"proposal": proposal.model_dump(mode="json"),
+                "status": "PENDING_REVIEW" if ready else "BLOCKED",
+                "reason": None if ready else "adoption_readiness_incomplete",
+                "trace": event(state, "prepare_adoption", review_ready=ready)}
 
     def model_stage(state, stage):
         e = bundle(state)
@@ -186,7 +204,7 @@ def build_graph(runtime: Runtime, checkpointer):
         eligible = {f["permission_id"] for f in current_facts if f["eligible"]}
         gates.append(Gate(gate_id="removal_evidence", result="pass" if removed <= eligible else "fail",
                           reasons=[] if removed <= eligible else ["removal_no_longer_eligible"]))
-        gates.extend(Gate.model_validate(g) for g in runtime.verification.check(e, rendered["result_rules"]))
+        gates.extend(checked_gates(runtime.verification.check(e, rendered["result_rules"]), "verification_unavailable"))
         ready = all(g.result == "pass" for g in gates)
         req = AnalysisRequest.model_validate(state["request"])
         simulation = req.mode == "simulation"
@@ -230,7 +248,8 @@ def build_graph(runtime: Runtime, checkpointer):
 
     def await_review(state):
         # No model invocation, publication or database write belongs in this node.
-        decision_id = interrupt({"proposal_id": state["proposal"]["proposal_id"], "simulation": True,
+        decision_id = interrupt({"proposal_id": state["proposal"]["proposal_id"], "simulation": state["proposal"]["simulation"],
+                                 "action": state["proposal"]["action"],
                                  "approval_hash": state["proposal"]["approval_hash"],
                                  "review_expires_at": state["proposal"]["review_expires_at"],
                                  "message": "Resume with a stored local TEST decision ID only."})
@@ -247,6 +266,7 @@ def build_graph(runtime: Runtime, checkpointer):
                     or decision.approval_hash != proposal.approval_hash or decision.target_uid != proposal.target.uid
                     or decision.policy_version != proposal.policy_version or decision.revoked
                     or decision.authority != "human" or not proposal.simulation or not decision.simulation
+                    or decision.approved_at < proposal.published_at
                     or decision.approved_at >= proposal.review_expires_at or decision.approved_at > now):
                 raise ValueError("invalid_or_revoked_decision")
             if decision.kind in ("reject", "acknowledge", "request_context"):
@@ -255,16 +275,27 @@ def build_graph(runtime: Runtime, checkpointer):
                         "trace": event(state, "revalidate", decision_kind=decision.kind)}
             if decision.execution_expires_at is None or now >= decision.execution_expires_at:
                 raise ValueError("execution_window_expired")
+            expected_kind = "adopt_baseline" if proposal.action == "adopt_baseline" else "approve_remediation"
+            if decision.kind != expected_kind:
+                raise ValueError("decision_kind_does_not_match_proposal")
             req = AnalysisRequest.model_validate(state["request"])
             current = runtime.evidence.current(req)
             if canonical_hash(current.model_dump(mode="json")) != proposal.evidence_hash:
                 raise ValueError("material_evidence_changed")
+            if proposal.action == "adopt_baseline":
+                gates = adoption_gates(current, runtime.verification, now)
+                if (runtime.baseline is None or not runtime.baseline.simulation_only
+                        or any(g.result != "pass" for g in gates)):
+                    raise ValueError("current_adoption_readiness_failed")
+                return {"status": "EXECUTION_REQUESTED", "reason": None,
+                        "trace": event(state, "revalidate", decision_kind=decision.kind, outcome="simulated_adoption_authority_valid")}
             facts, gates = build_facts(current, now)
             eligible = {f["permission_id"] for f in facts if f["eligible"]}
             if not set(proposal.removed_permission_ids) <= eligible or any(g.result != "pass" for g in gates):
                 raise ValueError("current_readiness_failed")
-            checks = runtime.verification.check(current, [r.model_dump(exclude_defaults=True) for r in proposal.result_rules])
-            if any(g["result"] != "pass" for g in checks):
+            checks = checked_gates(runtime.verification.check(current, [r.model_dump(exclude_defaults=True) for r in proposal.result_rules]),
+                                   "verification_unavailable")
+            if any(g.result != "pass" for g in checks):
                 raise ValueError("backend_readiness_failed")
             return {"status": "EXECUTION_REQUESTED", "reason": None,
                     "trace": event(state, "revalidate", decision_kind=decision.kind, outcome="simulated_authority_valid")}
@@ -279,6 +310,17 @@ def build_graph(runtime: Runtime, checkpointer):
         except (LookupError, ValueError) as exc:
             return {"status": "STALE", "reason": str(exc), "trace": event(state, "request_execution", outcome="blocked")}
         return {"receipt": receipt, "trace": event(state, "request_execution", outcome="recorded_only")}
+
+    def commit_baseline_adoption(state):
+        p = state["proposal"]
+        key = canonical_hash([p["proposal_id"], state["decision_id"], p["approval_hash"]])
+        try:
+            if runtime.baseline is None:
+                raise ValueError("adoption_port_unavailable")
+            receipt = runtime.baseline.adopt_approved_snapshot(p["proposal_id"], state["decision_id"], key)
+        except (LookupError, ValueError) as exc:
+            return {"status": "STALE", "reason": str(exc), "trace": event(state, "commit_baseline_adoption", outcome="blocked")}
+        return {"receipt": receipt, "trace": event(state, "commit_baseline_adoption", outcome="recorded_only")}
 
     def finalize(state):
         require_compatible_state(state)
@@ -297,11 +339,13 @@ def build_graph(runtime: Runtime, checkpointer):
 
     for name, function in [("accept_case", accept_case), ("load_evidence", load_evidence),
                            ("build_facts", facts_node), ("assess_risk", assess_risk),
+                           ("prepare_adoption", prepare_adoption),
                            ("investigate_context", investigate_context), ("fetch_context", fetch_context),
                            ("select_strategy", select_strategy), ("plan_change", plan_change),
                            ("render_and_validate", render_and_validate), ("publish_review", publish_review),
                            ("await_review", await_review), ("revalidate", revalidate),
-                           ("request_execution", request_execution), ("finalize", finalize)]:
+                           ("request_execution", request_execution), ("commit_baseline_adoption", commit_baseline_adoption),
+                           ("finalize", finalize)]:
         # Guard direct Command resume and crash recovery, not only CLI callers.
         graph.add_node(name, function if name in ("accept_case", "load_evidence", "finalize") else compatible_node(function))
     graph.add_edge(START, "accept_case")
@@ -309,7 +353,10 @@ def build_graph(runtime: Runtime, checkpointer):
     graph.add_conditional_edges("load_evidence", lambda s: "finalize" if s["status"] == "BLOCKED" else "build_facts",
                                 ["finalize", "build_facts"])
     graph.add_edge("build_facts", "assess_risk")
-    graph.add_edge("assess_risk", "investigate_context")
+    graph.add_conditional_edges("assess_risk", lambda s: "prepare_adoption" if s["request"]["intent"] == "adopt_baseline" else "investigate_context",
+                                ["prepare_adoption", "investigate_context"])
+    graph.add_conditional_edges("prepare_adoption", lambda s: "publish_review" if s["status"] == "PENDING_REVIEW" else "finalize",
+                                ["publish_review", "finalize"])
     graph.add_conditional_edges("investigate_context", investigation_route,
                                 ["investigate_context", "fetch_context", "select_strategy", "finalize"])
     graph.add_conditional_edges("fetch_context", lambda s: "finalize" if s["status"] == "BLOCKED" else "build_facts",
@@ -322,8 +369,10 @@ def build_graph(runtime: Runtime, checkpointer):
                                 ["publish_review", "finalize"])
     graph.add_edge("publish_review", "await_review")
     graph.add_edge("await_review", "revalidate")
-    graph.add_conditional_edges("revalidate", lambda s: "request_execution" if s["status"] == "EXECUTION_REQUESTED" else "finalize",
-                                ["request_execution", "finalize"])
+    graph.add_conditional_edges("revalidate", lambda s: ("commit_baseline_adoption" if s["proposal"]["action"] == "adopt_baseline" else "request_execution")
+                                if s["status"] == "EXECUTION_REQUESTED" else "finalize",
+                                ["request_execution", "commit_baseline_adoption", "finalize"])
     graph.add_edge("request_execution", "finalize")
+    graph.add_edge("commit_baseline_adoption", "finalize")
     graph.add_edge("finalize", END)
     return graph.compile(checkpointer=checkpointer)

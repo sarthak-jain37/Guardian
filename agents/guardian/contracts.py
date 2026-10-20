@@ -132,7 +132,7 @@ class EvidenceBundle(Contract):
 
 
 class AnalysisRequest(Contract):
-    schema_version: Literal["guardian.analysis-request.v2"] = "guardian.analysis-request.v2"
+    schema_version: Literal["guardian.analysis-request.v3"] = "guardian.analysis-request.v3"
     case_id: ID
     run_id: ID
     revision: int = Field(default=1, strict=True, ge=1)
@@ -143,6 +143,7 @@ class AnalysisRequest(Contract):
     baseline_id: ID | None = None
     policy_version: ID = "guardian.demo-policy.v1"
     mode: Literal["simulation", "preview"] = "simulation"
+    intent: Literal["analyze", "adopt_baseline"] = "analyze"
 
 
 def validate_request_evidence(request: AnalysisRequest, evidence: EvidenceBundle) -> None:
@@ -242,7 +243,8 @@ class ReadinessAssessment(Contract):
 
 
 class Proposal(Contract):
-    schema_version: Literal["guardian.proposal.v1"] = "guardian.proposal.v1"
+    schema_version: Literal["guardian.proposal.v2"] = "guardian.proposal.v2"
+    action: Literal["remediate", "adopt_baseline"] = "remediate"
     proposal_id: ID
     case_id: ID
     run_id: ID
@@ -259,22 +261,37 @@ class Proposal(Contract):
     result_rules: list[RoleRule] = Field(max_length=64)
     patch: list[dict] = Field(max_length=3)
     role_yaml: Text
-    diff: Text
+    diff: str = Field(max_length=4000)
     gates: list[Gate] = Field(max_length=16)
     uncertainty: list[Text] = Field(max_length=8)
     published_at: AwareDatetime
     review_expires_at: AwareDatetime
     execution_window_seconds: int = Field(strict=True, ge=1)
-    verification_profile_id: Literal["pod-reader-behavior.v1"]
+    verification_profile_id: Literal["pod-reader-behavior.v1"] | None
     recovery_authorized: Literal[False] = False
+
+    @model_validator(mode="after")
+    def action_scope(self):
+        utc(self.published_at)
+        utc(self.review_expires_at)
+        if self.review_expires_at <= self.published_at:
+            raise ValueError("review deadline must follow publication")
+        if self.action == "adopt_baseline":
+            if self.patch or self.removed_permission_ids or self.result_rules != self.target.rules:
+                raise ValueError("baseline adoption must preserve the exact snapshot without a patch")
+            if self.verification_profile_id is not None:
+                raise ValueError("adoption does not authorize mutation verification")
+        elif not self.verification_profile_id:
+            raise ValueError("remediation requires a verification profile")
+        return self
 
 
 class ApprovalDecision(Contract):
-    schema_version: Literal["guardian.test-decision.v1"] = "guardian.test-decision.v1"
+    schema_version: Literal["guardian.test-decision.v2"] = "guardian.test-decision.v2"
     decision_id: ID
     proposal_id: ID
     revision: int = Field(strict=True, ge=1)
-    kind: Literal["approve_remediation", "reject", "acknowledge", "request_context"]
+    kind: Literal["approve_remediation", "adopt_baseline", "reject", "acknowledge", "request_context"]
     authority: Literal["human"]
     actor: Literal["local-demo-reviewer"]
     simulation: Literal[True]
@@ -288,17 +305,19 @@ class ApprovalDecision(Contract):
     @model_validator(mode="after")
     def timestamps(self):
         utc(self.approved_at)
-        if self.kind == "approve_remediation":
+        if self.kind in ("approve_remediation", "adopt_baseline"):
+            if self.execution_expires_at is not None:
+                utc(self.execution_expires_at)
             if self.execution_expires_at is None or utc(self.execution_expires_at) <= self.approved_at:
-                raise ValueError("remediation decision needs execution deadline")
+                raise ValueError("governed change decision needs execution deadline")
         elif self.execution_expires_at is not None:
             raise ValueError("non-writing decision cannot authorize execution")
         return self
 
 
 class AnalysisReport(Contract):
-    schema_version: Literal["guardian.report.v2"] = "guardian.report.v2"
-    graph_version: Literal["guardian.graph.v2"]
+    schema_version: Literal["guardian.report.v3"] = "guardian.report.v3"
+    graph_version: Literal["guardian.graph.v3"]
     versions: RunVersions
     case_id: ID
     run_id: ID

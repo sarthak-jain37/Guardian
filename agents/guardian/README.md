@@ -2,6 +2,14 @@
 
 ## Plan v4 foundation update
 
+Phase 2 adds explicit snapshot adoption using `start --intent adopt_baseline`.
+It skips the model and can reach review without usage telemetry or a removal
+candidate. `decide adopt_baseline` authorizes only that exact adoption. The
+recording baseline adapter records a local test request with
+`baseline_activated=false`; it performs no Kubernetes write. Captured exports
+remain previews. Request/report schemas and graph/state versions are now v3;
+proposal/test-decision schemas are v2. See contract decision 0002.
+
 The next implementation is divided into contracts/compatibility, graph review
 routes, model/tool integration, backend governance adapters, then real-model/lab
 validation. Phase 1 implements the contract and checkpoint foundation. The

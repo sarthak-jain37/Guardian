@@ -10,7 +10,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 
 from .adapters.local import (FixtureEvidencePort, LocalTestStore, PreviewVerificationPort,
-                             RecordingExecutor, SimulatedVerificationPort)
+                             RecordingBaselinePort, RecordingExecutor, SimulatedVerificationPort)
 from .adapters.models import LlamaCppModelClient, ScriptedModelClient
 from .contracts import AnalysisRequest, EvidenceBundle, utc_now
 from .fixtures import demo_evidence
@@ -28,7 +28,7 @@ def open_runner(directory, model=None, evidence=None, clock=utc_now):
     adapter = FixtureEvidencePort(evidence)
     runtime = Runtime(adapter, model or ScriptedModelClient(), store,
                       SimulatedVerificationPort() if evidence.source_mode == "fixture" else PreviewVerificationPort(),
-                      RecordingExecutor(store), clock=clock, budget=store)
+                      RecordingExecutor(store), clock=clock, budget=store, baseline=RecordingBaselinePort(store))
     with SqliteSaver.from_conn_string(str(directory / "checkpoints.sqlite")) as saver:
         try:
             yield build_graph(runtime, saver), runtime, store
@@ -64,9 +64,10 @@ def main(argv=None):
     start.add_argument("--model-path", required=False, help="GGUF path; defaults to MODEL_PATH environment variable")
     start.add_argument("--timeout", type=int, default=180)
     start.add_argument("--threads", type=int, default=4)
+    start.add_argument("--intent", choices=["analyze", "adopt_baseline"], default="analyze")
     sub.add_parser("status")
     decision = sub.add_parser("decide")
-    decision.add_argument("kind", choices=["approve_remediation", "reject", "acknowledge", "request_context"])
+    decision.add_argument("kind", choices=["approve_remediation", "adopt_baseline", "reject", "acknowledge", "request_context"])
     resume = sub.add_parser("resume")
     resume.add_argument("--decision-id", required=True)
     sub.add_parser("schema")
@@ -90,6 +91,7 @@ def main(argv=None):
                                   snapshot_id=evidence.snapshot_id, cluster_id=evidence.target.cluster_id,
                                   target_uid=evidence.target.uid, baseline_id=evidence.baseline_id,
                                   policy_version=evidence.policy.policy_version,
+                                  intent=args.intent,
                                   mode="preview" if args.evidence else "simulation")
         (directory / "evidence.json").write_text(evidence.model_dump_json(indent=2))
         if args.model == "llama-cpp":
