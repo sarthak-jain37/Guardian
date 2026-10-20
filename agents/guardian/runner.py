@@ -15,6 +15,7 @@ from .adapters.models import LlamaCppModelClient, ScriptedModelClient
 from .contracts import AnalysisRequest, EvidenceBundle, utc_now
 from .fixtures import demo_evidence
 from .graph import Runtime, build_graph, report
+from .versions import IncompatibleRunError, require_compatible_state
 
 
 @contextmanager
@@ -71,8 +72,8 @@ def main(argv=None):
     sub.add_parser("schema")
     args = parser.parse_args(argv)
     if args.command == "schema":
-        from contracts.usage_summary_v1 import UsageSummary
-        print(json.dumps({"evidence": EvidenceBundle.model_json_schema(), "usage": UsageSummary.model_json_schema()}, indent=2))
+        from .schemas import export_schemas
+        print(json.dumps(export_schemas(), indent=2))
         return
     directory = Path(args.directory)
     directory.mkdir(parents=True, exist_ok=True)
@@ -87,7 +88,9 @@ def main(argv=None):
             evidence = demo_evidence(args.scenario)
         request = AnalysisRequest(case_id=f"case-{uuid4().hex[:12]}", run_id=f"run-{uuid4().hex[:12]}",
                                   snapshot_id=evidence.snapshot_id, cluster_id=evidence.target.cluster_id,
-                                  target_uid=evidence.target.uid, mode="preview" if args.evidence else "simulation")
+                                  target_uid=evidence.target.uid, baseline_id=evidence.baseline_id,
+                                  policy_version=evidence.policy.policy_version,
+                                  mode="preview" if args.evidence else "simulation")
         (directory / "evidence.json").write_text(evidence.model_dump_json(indent=2))
         if args.model == "llama-cpp":
             import os
@@ -114,6 +117,15 @@ def main(argv=None):
     with open_runner(directory) as (graph, runtime, store):
         runtime.model.producer = run["producer"]
         state = graph.get_state(config(run["run_id"])).values
+        try:
+            require_compatible_state(state)
+        except IncompatibleRunError as exc:
+            if args.command != "status":
+                parser.error(str(exc))
+            print(json.dumps({"run_id": run["run_id"], "status": state.get("status"),
+                              "compatible": False, "reason": str(exc),
+                              "execution_requests": store.count("action")}, indent=2))
+            return
         if args.command == "status":
             print(json.dumps({"run_id": run["run_id"], "status": state["status"], "reason": state.get("reason"),
                               "simulation": state["request"]["mode"] == "simulation", "model_calls": state["model_calls"],

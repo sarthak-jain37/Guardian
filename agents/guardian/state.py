@@ -2,8 +2,11 @@
 
 from typing import Any, TypedDict
 
+from .lifecycle import RunStatus
+
 
 class GuardianState(TypedDict, total=False):
+    versions: dict[str, str]
     request: dict
     evidence: dict
     facts: list[dict]
@@ -12,7 +15,7 @@ class GuardianState(TypedDict, total=False):
     plan: dict | None
     proposal: dict | None
     decision_id: str | None
-    status: str
+    status: RunStatus
     reason: str | None
     model_calls: int
     lookup_rounds: int
@@ -23,4 +26,5 @@ class GuardianState(TypedDict, total=False):
     retry_stage: bool
     trace: list[dict[str, Any]]
     receipt: dict | None
+    readiness: dict | None
     started_at: str

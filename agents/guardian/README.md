@@ -1,5 +1,32 @@
 # Guardian LangGraph module demo
 
+## Plan v4 foundation update
+
+The next implementation is divided into contracts/compatibility, graph review
+routes, model/tool integration, backend governance adapters, then real-model/lab
+validation. Phase 1 implements the contract and checkpoint foundation. The
+personal phase plan remains in Git-ignored `personal_docs/langgraph-part2-phases.md`.
+
+Requests now use `guardian.analysis-request.v2` and bind the optional baseline and
+policy version as well as snapshot/cluster/target UID. Reports use
+`guardian.report.v2` with typed permission facts, readiness and runtime versions.
+The three lifecycle vocabularies are separate; defining their values does not
+implement backend lifecycle persistence. The graph independently validates exports
+from every evidence adapter before analysis.
+
+`schema` exports all ten boundary/model schemas from the runtime definitions.
+See `contracts/compatibility.json` and
+`contracts/decisions/0001-orchestration-foundations.md` for producer/consumer review
+status and wire versions. Shared component acceptance is pending. Production
+decision/verification/recovery/receipt integration belongs to subsequent phases;
+the exported test-decision contract remains simulation-only.
+
+Checkpoints require compatible graph/state/validator/canonicalization/policy
+versions. Earlier unstamped reviews can be inspected with `status`, which reports
+`compatible=false`; `decide` and `resume` refuse them. Preserve old directories,
+reconcile any already-requested real backend action, and use a fresh reviewed
+revision. There is no automatic checkpoint migration or authority renewal.
+
 This implements the first orchestration slice of the v3 design. It demonstrates useful initial analysis without an approved baseline, separate investigator/planner stages, deterministic policy rendering, and a restartable review flow. It does not implement collector storage, backend authentication, the production decision ledger, a Kubernetes executor, baseline activation, recovery, or deployment.
 
 All built-in evidence is **synthetic fixture data**. Scripted model responses are explicitly labeled `scripted-test`. The optional llama.cpp adapter runs real inference over the same fixture, without hidden required/unnecessary labels. Every review/decision/execution record is a **local simulation**. The recording executor performs no cluster writes and cannot activate a baseline. Captured evidence accepts preview mode only; missing backend verification prevents execution review.

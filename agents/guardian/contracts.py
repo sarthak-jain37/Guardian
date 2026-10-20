@@ -3,9 +3,12 @@
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, Field, model_validator
+from pydantic import AwareDatetime, Field, JsonValue, model_validator
 
 from contracts.usage_summary_v1 import Contract, ID, Subject, UsageSummary, utc
+
+from .lifecycle import ProposalStatus, RunStatus
+from .versions import RunVersions
 
 Text = Annotated[str, Field(min_length=1, max_length=4000)]
 
@@ -30,6 +33,8 @@ class Target(Contract):
 
     @model_validator(mode="after")
     def bounded_rule_expansion(self):
+        if (self.kind == "Role") != (self.namespace is not None):
+            raise ValueError("Role requires namespace; ClusterRole forbids namespace")
         if sum(len(r.apiGroups) * len(r.resources) * len(r.verbs) for r in self.rules) > 128:
             raise ValueError("pilot input supports at most 128 permission combinations")
         return self
@@ -127,7 +132,7 @@ class EvidenceBundle(Contract):
 
 
 class AnalysisRequest(Contract):
-    schema_version: Literal["guardian.analysis-request.v1"] = "guardian.analysis-request.v1"
+    schema_version: Literal["guardian.analysis-request.v2"] = "guardian.analysis-request.v2"
     case_id: ID
     run_id: ID
     revision: int = Field(default=1, strict=True, ge=1)
@@ -135,7 +140,21 @@ class AnalysisRequest(Contract):
     snapshot_id: ID
     cluster_id: ID
     target_uid: ID
+    baseline_id: ID | None = None
+    policy_version: ID = "guardian.demo-policy.v1"
     mode: Literal["simulation", "preview"] = "simulation"
+
+
+def validate_request_evidence(request: AnalysisRequest, evidence: EvidenceBundle) -> None:
+    """Consumer-side checks apply to every adapter, including future real ports."""
+    expected = (request.snapshot_id, request.cluster_id, request.target_uid,
+                request.baseline_id, request.policy_version)
+    actual = (evidence.snapshot_id, evidence.target.cluster_id, evidence.target.uid,
+              evidence.baseline_id, evidence.policy.policy_version)
+    if expected != actual:
+        raise ValueError("request_evidence_mismatch: snapshot, scope, baseline or policy differs")
+    if request.mode == "simulation" and evidence.source_mode != "fixture":
+        raise ValueError("captured evidence cannot enter simulation review")
 
 
 class ContextLookup(Contract):
@@ -179,6 +198,49 @@ class Gate(Contract):
     reasons: list[ID] = Field(max_length=32)
 
 
+class PermissionFact(Contract):
+    permission_id: ID
+    api_group: str = Field(max_length=256)
+    resource: ID
+    verb: ID
+    namespace: ID | None
+    authorized_use: Annotated[int, Field(strict=True, ge=0)] | None
+    protected: bool = Field(strict=True)
+    eligible: bool = Field(strict=True)
+    reason_codes: list[ID] = Field(max_length=64)
+    evidence_ids: list[ID] = Field(min_length=1, max_length=1024)
+
+    @model_validator(mode="after")
+    def protections(self):
+        if self.eligible and (self.protected or self.reason_codes or self.authorized_use != 0):
+            raise ValueError("eligible removal requires unprotected, known covered non-use")
+        return self
+
+
+class ReadinessAssessment(Contract):
+    """Projection of deterministic gates, never model-issued execution authority."""
+
+    schema_version: Literal["guardian.readiness.v1"] = "guardian.readiness.v1"
+    policy_version: ID
+    evidence_revision: int = Field(strict=True, ge=1)
+    gates: list[Gate] = Field(min_length=1, max_length=32)
+    allowed_removal_ids: list[ID] = Field(max_length=128)
+    protected_permission_ids: list[ID] = Field(max_length=128)
+    residual_uncertainties: list[Text] = Field(max_length=8)
+    execution_ready: bool = Field(strict=True)
+
+    @model_validator(mode="after")
+    def consistency(self):
+        for ids in ([g.gate_id for g in self.gates], self.allowed_removal_ids, self.protected_permission_ids):
+            if len(ids) != len(set(ids)):
+                raise ValueError("duplicate readiness ID")
+        if set(self.allowed_removal_ids) & set(self.protected_permission_ids):
+            raise ValueError("protected permission cannot be allowed for removal")
+        if self.execution_ready and (not self.allowed_removal_ids or any(g.result != "pass" for g in self.gates)):
+            raise ValueError("execution readiness requires nonempty removals and all gates passing")
+        return self
+
+
 class Proposal(Contract):
     schema_version: Literal["guardian.proposal.v1"] = "guardian.proposal.v1"
     proposal_id: ID
@@ -186,7 +248,7 @@ class Proposal(Contract):
     run_id: ID
     revision: int = Field(strict=True, ge=1)
     simulation: bool = Field(strict=True)
-    status: Literal["DRAFT", "BLOCKED", "PENDING_APPROVAL", "APPROVED", "REJECTED", "EXPIRED", "SUPERSEDED"]
+    status: ProposalStatus
     target: Target
     unchanged_binding: Binding | None
     evidence_hash: ID
@@ -232,6 +294,29 @@ class ApprovalDecision(Contract):
         elif self.execution_expires_at is not None:
             raise ValueError("non-writing decision cannot authorize execution")
         return self
+
+
+class AnalysisReport(Contract):
+    schema_version: Literal["guardian.report.v2"] = "guardian.report.v2"
+    graph_version: Literal["guardian.graph.v2"]
+    versions: RunVersions
+    case_id: ID
+    run_id: ID
+    mode: Literal["simulation", "preview"]
+    producer: ID
+    status: RunStatus
+    reason: Text | None
+    facts: list[PermissionFact] = Field(max_length=128)
+    # The scanner owns its finding schema; retain its JSON output without a
+    # competing risk implementation or inference object in the checkpoint.
+    security_risk: list[dict[str, JsonValue]] = Field(max_length=1024)
+    investigation: Investigation | None
+    plan: ChangePlan | None
+    readiness: ReadinessAssessment | None
+    model_status: ID
+    model_calls: int = Field(strict=True, ge=0, le=6)
+    lookup_calls: int = Field(strict=True, ge=0, le=4)
+    trace: list[dict[str, JsonValue]] = Field(max_length=128)
 
 
 def utc_now() -> datetime:
