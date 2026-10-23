@@ -30,3 +30,18 @@ authenticated ledger/outbox, real verification and execution remain backend-owne
 
 Transport references: [vLLM structured output](https://docs.vllm.ai/en/latest/features/structured_outputs/)
 and [LangGraph interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts).
+
+Six read-only tools accept only IDs from the current case/subject/target and
+fixed usage query. Strict results keep SAR checks separate from usage counts and
+permit only the relevant context/usage/consumer fields to refresh. Failure records
+can block their exact candidate/workload/image/policy context; the model cannot
+clear them. Credentials, arbitrary URLs/paths, raw log bodies and cluster mutation
+are absent from the tool schemas. Real backend adapters must enforce supplied
+deadlines and repeat current execution/governance checks independently.
+
+Before inference, a durable reservation consumes the model invocation and any
+single stage-wide repair. Before tool dispatch, a durable batch consumes lookup
+round/call budgets. Completed results are cached for checkpoint replay; an issued
+read whose response was lost produces an explicit uncertain outcome rather than
+a blind repeat. Exhausted unresolved lookups publish findings and finish blocked.
+Graph/state/report advance to v6 and validator v2 for these semantics.

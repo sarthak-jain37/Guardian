@@ -159,9 +159,17 @@ def validate_request_evidence(request: AnalysisRequest, evidence: EvidenceBundle
         raise ValueError("captured evidence cannot enter simulation review")
 
 
+EvidenceToolName = Literal["get_case_snapshot", "get_workload_context", "get_usage_summary", "get_binding_consumers", "get_failure_history", "check_access"]
+
+
 class ContextLookup(Contract):
-    tool: Literal["get_workload_context"]
+    tool: EvidenceToolName
     subject_id: ID
+    case_id: ID | None = None
+    target_uid: ID | None = None
+    permission_id: ID | None = None
+    usage_summary_id: ID | None = None
+    request_key_ids: list[ID] = Field(default_factory=list, max_length=16)
 
 
 class PermissionAssessment(Contract):
@@ -317,8 +325,8 @@ class ApprovalDecision(Contract):
 
 
 class AnalysisReport(Contract):
-    schema_version: Literal["guardian.report.v5"] = "guardian.report.v5"
-    graph_version: Literal["guardian.graph.v5"]
+    schema_version: Literal["guardian.report.v6"] = "guardian.report.v6"
+    graph_version: Literal["guardian.graph.v6"]
     versions: RunVersions
     case_id: ID
     run_id: ID

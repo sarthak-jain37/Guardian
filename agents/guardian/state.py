@@ -30,4 +30,5 @@ class GuardianState(TypedDict, total=False):
     revision_request: dict | None
     analysis_producer: str
     model_config_hash: str
+    tool_results: list[dict]
     started_at: str

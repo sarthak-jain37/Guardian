@@ -7,7 +7,7 @@ from typing import Callable
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
-from .contracts import (AnalysisReport, AnalysisRequest, ApprovalDecision, ChangePlan, EvidenceBundle, Gate,
+from .contracts import (AnalysisReport, AnalysisRequest, ApprovalDecision, ChangePlan, ContextLookup, EvidenceBundle, Gate,
                         Investigation, Proposal, ReadinessAssessment, utc_now, validate_request_evidence)
 from .policy import (build_facts, canonical_hash, global_gates, render, risk_findings,
                      validate_investigation, validate_plan)
@@ -17,6 +17,7 @@ from .revisions import prepare_revision, read_evidence
 from .state import GuardianState
 from .versions import GRAPH_VERSION, current_versions, require_compatible_state
 from .modeling import call_model, model_config
+from .evidence_tools import allowed_lookups, validate_lookup, validate_result
 
 
 @dataclass
@@ -53,6 +54,8 @@ def report(state, runtime):
 
 
 def build_graph(runtime: Runtime, checkpointer):
+    if runtime.budget is None:
+        raise ValueError("durable_budget_port_required")
     def accept_case(state, config):
         if state.get("started_at") is not None:
             require_compatible_state(state)
@@ -68,6 +71,7 @@ def build_graph(runtime: Runtime, checkpointer):
                 "proposal": None, "receipt": None, "readiness": None, "revision_request": None,
                 "analysis_producer": runtime.model.producer,
                 "model_config_hash": model_config(runtime.model).fingerprint(),
+                "tool_results": [],
                 "trace": event(state, "accept_case", graph_version=GRAPH_VERSION)}
 
     def load_evidence(state):
@@ -102,6 +106,10 @@ def build_graph(runtime: Runtime, checkpointer):
 
     def facts_node(state):
         facts, gates = build_facts(bundle(state), runtime.clock())
+        tool_refs = {ref for result in state["tool_results"] for ref in result["evidence_refs"]}
+        tool_refs.update(ref for result in state["tool_results"] for failure in result.get("failures", []) for ref in failure["evidence_refs"])
+        for fact in facts:
+            fact["evidence_ids"] = sorted(set(fact["evidence_ids"]) | tool_refs)
         readiness = ReadinessAssessment(policy_version=bundle(state).policy.policy_version,
                                         evidence_revision=bundle(state).revision, gates=gates,
                                         allowed_removal_ids=[f["permission_id"] for f in facts if f["eligible"]],
@@ -169,6 +177,11 @@ def build_graph(runtime: Runtime, checkpointer):
                     "status": "BLOCKED", "reason": "model_configuration_changed",
                     "trace": event(state, stage, outcome="configuration_changed")}
         active_limit = min(e.policy.active_run_timeout_seconds, settings.active_run_timeout_seconds)
+        repairing = state.get("retry_stage", False)
+        if repairing and runtime.budget.model_repair_count(state["request"]["run_id"], stage):
+            return {"model_status": "repair_exhausted", "model_calls": count, "retry_stage": False, repairs_key: 1,
+                    "status": "BLOCKED", "reason": "stage_repair_budget_exhausted",
+                    "trace": event(state, stage, outcome="repair_exhausted_after_restart")}
         if count >= e.policy.model_calls or elapsed >= active_limit:
             return {"model_status": "budget_exhausted", "model_calls": count, "retry_stage": False, "status": "BLOCKED",
                     "reason": "model_budget_exhausted", "trace": event(state, stage, outcome="budget_exhausted")}
@@ -177,12 +190,14 @@ def build_graph(runtime: Runtime, checkpointer):
                    "evidence_policy": e.policy.model_dump(),
                    "observation_window": e.usage.query_window.model_dump(mode="json") if e.usage else None,
                    "allowed_lookup": {"tool": "get_workload_context", "subject_id": e.subject.username},
+                   "allowed_lookups": allowed_lookups(AnalysisRequest.model_validate(state["request"]), e, state["facts"]),
+                   "tool_results": [{k: v for k, v in r.items() if k != "evidence"} for r in state["tool_results"]],
                    "remaining_lookup_rounds": e.policy.lookup_rounds - state["lookup_rounds"],
                    "previous_validation_error": state.get("reason") if state.get("retry_stage") else None}
         if stage == "planner":
             payload["investigation"] = state["investigation"]
         if runtime.budget:
-            count = runtime.budget.reserve_model_call(state["request"]["run_id"], stage, e.policy.model_calls) - 1
+            count = runtime.budget.reserve_model_call(state["request"]["run_id"], stage, e.policy.model_calls, repair=repairing) - 1
         try:
             result = call_model(runtime.model, stage, payload, output_type.model_json_schema(),
                                 min(settings.request_timeout_seconds, active_limit - elapsed))
@@ -191,12 +206,14 @@ def build_graph(runtime: Runtime, checkpointer):
             output = output_type.model_validate(result.response)
             if stage == "investigator":
                 validate_investigation(output, state["facts"], e)
+                for lookup in output.context_requests:
+                    validate_lookup(lookup, AnalysisRequest.model_validate(state["request"]), e, state["facts"])
             else:
                 validate_plan(output, state["facts"], Investigation.model_validate(state["investigation"]), e)
         except Exception as exc:
-            retry = state[repairs_key] < 1 and count + 1 < e.policy.model_calls
+            retry = runtime.budget.model_repair_count(state["request"]["run_id"], stage) < 1 and count + 1 < e.policy.model_calls
             # This boundary contains no interrupt; GraphInterrupt is never swallowed here.
-            return {"model_calls": count + 1, repairs_key: state[repairs_key] + int(retry),
+            return {"model_calls": count + 1, repairs_key: runtime.budget.model_repair_count(state["request"]["run_id"], stage),
                     "model_status": f"{stage}_failed", "retry_stage": retry,
                     "reason": f"{type(exc).__name__}: {str(exc)[:300]}",
                     "status": "ANALYZING" if retry else "BLOCKED",
@@ -204,6 +221,7 @@ def build_graph(runtime: Runtime, checkpointer):
                                    model_result=result.model_dump(mode="json") if "result" in locals() else None)}
         key = "investigation" if stage == "investigator" else "plan"
         return {key: output.model_dump(mode="json"), "model_calls": count + 1,
+                repairs_key: runtime.budget.model_repair_count(state["request"]["run_id"], stage),
                 "model_status": f"{stage}_valid", "retry_stage": False, "reason": None,
                 "trace": event(state, stage, outcome="validated", producer=runtime.model.producer,
                                model_result=result.model_dump(mode="json"))}
@@ -220,28 +238,53 @@ def build_graph(runtime: Runtime, checkpointer):
         policy = bundle(state).policy
         if requests and state["lookup_rounds"] < policy.lookup_rounds and state["lookup_calls"] + len(requests) <= policy.lookup_calls:
             return "fetch_context"
+        if requests:
+            return "lookup_exhausted"
         return "select_strategy"
 
+    def lookup_exhausted(state):
+        return {"status": "BLOCKED", "reason": "lookup_budget_exhausted",
+                "trace": event(state, "fetch_context", outcome="budget_exhausted")}
+
     def fetch_context(state):
-        from .contracts import ContextLookup
         e = bundle(state)
         req = AnalysisRequest.model_validate(state["request"])
         requests = state["investigation"]["context_requests"]
+        results = list(state["tool_results"])
+        batch = None
         try:
-            for lookup in requests:
-                refreshed = runtime.evidence.fetch_context(req, ContextLookup.model_validate(lookup))
-                # Context lookup cannot change grants, usage, baseline, policy or authority.
-                unchanged = ["target", "subject", "binding", "usage", "baseline_id", "policy", "source_mode"]
-                if any(getattr(refreshed, key) != getattr(e, key) for key in unchanged):
-                    raise ValueError("context lookup changed non-context evidence")
-                e = refreshed
+            key = canonical_hash([req.run_id, state["lookup_rounds"], requests])
+            batch = runtime.budget.reserve_lookup_batch(req.run_id, key, requests, e.policy.lookup_rounds, e.policy.lookup_calls)
+            for index, raw_lookup in enumerate(requests):
+                lookup = ContextLookup.model_validate(raw_lookup)
+                validate_lookup(lookup, req, e, state["facts"])
+                raw = runtime.budget.begin_lookup(key, index)
+                if raw is None:
+                    remaining = min(e.policy.active_run_timeout_seconds, model_config(runtime.model).active_run_timeout_seconds) - (
+                        runtime.clock() - datetime.fromisoformat(state["started_at"])).total_seconds()
+                    if remaining <= 0:
+                        raise ValueError("active_run_timeout")
+                    raw = runtime.evidence.lookup(req, lookup, timeout_seconds=min(30, remaining))
+                    result = validate_result(raw, lookup, req, e)
+                    if len(result.model_dump_json().encode()) > model_config(runtime.model).max_input_bytes:
+                        raise ValueError("tool_result_too_large")
+                    runtime.budget.complete_lookup(key, index, result.model_dump(mode="json"))
+                else:
+                    result = validate_result(raw, lookup, req, e)
+                e = result.evidence or e
+                results.append(result.model_dump(mode="json"))
         except Exception as exc:
-            return {"status": "BLOCKED", "reason": f"context_lookup_failed: {type(exc).__name__}",
-                    "lookup_calls": state["lookup_calls"] + len(requests),
-                    "lookup_rounds": state["lookup_rounds"] + 1,
+            visible = {"lookup_outcome_uncertain_after_restart", "lookup_budget_exhausted", "active_run_timeout",
+                       "tool_result_too_large", "lookup_changed_unrelated_evidence", "tool_result_scope_mismatch"}
+            reason = str(exc) if type(exc) is ValueError and str(exc) in visible else type(exc).__name__
+            return {"status": "BLOCKED", "reason": f"context_lookup_failed: {reason[:200]}",
+                    "tool_results": results,
+                    "lookup_calls": batch["total_calls"] if batch else state["lookup_calls"],
+                    "lookup_rounds": batch["round"] if batch else state["lookup_rounds"],
                     "trace": event(state, "fetch_context", outcome="failed")}
-        return {"evidence": e.model_dump(mode="json"), "lookup_calls": state["lookup_calls"] + len(requests),
-                "lookup_rounds": state["lookup_rounds"] + 1, "trace": event(state, "fetch_context", outcome="loaded")}
+        return {"evidence": e.model_dump(mode="json"), "lookup_calls": batch["total_calls"],
+                "lookup_rounds": batch["round"], "tool_results": results,
+                "trace": event(state, "fetch_context", outcome="loaded", results=results[-len(requests):])}
 
     def select_strategy(state):
         assessment = state["investigation"]
@@ -264,7 +307,16 @@ def build_graph(runtime: Runtime, checkpointer):
         if not removed:
             return {"status": "NO_CHANGE", "reason": "planner_retained_all", "trace": event(state, "render_and_validate")}
         rendered = render(e, removed)
+        candidate_hash = canonical_hash({"target_uid": e.target.uid, "namespace": e.target.namespace,
+                                        "strategy": plan.strategy_id, "rules": rendered["result_rules"]})
         gates = global_gates(e, runtime.clock())
+        failures = [f for result in state["tool_results"] for f in result.get("failures", [])]
+        blocked = any(f["blocks_candidate"] and f["candidate_hash"] == candidate_hash
+                      and f["target_uid"] == e.target.uid and f["policy_version"] == e.policy.policy_version
+                      and e.context and f["workload_uid"] == e.context.workload_uid and f["image_digest"] == e.context.image_digest
+                      for f in failures)
+        gates.append(Gate(gate_id="candidate_failure_history", result="fail" if blocked else "pass",
+                          reasons=["prior_candidate_failure"] if blocked else []))
         current_facts, _ = build_facts(e, runtime.clock())
         eligible = {f["permission_id"] for f in current_facts if f["eligible"]}
         gates.append(Gate(gate_id="removal_evidence", result="pass" if removed <= eligible else "fail",
@@ -427,6 +479,7 @@ def build_graph(runtime: Runtime, checkpointer):
                            ("prepare_adoption", prepare_adoption),
                            ("restore_analysis", restore_analysis),
                            ("investigate_context", investigate_context), ("fetch_context", fetch_context),
+                           ("lookup_exhausted", lookup_exhausted),
                            ("select_strategy", select_strategy), ("plan_change", plan_change),
                            ("render_and_validate", render_and_validate), ("publish_review", publish_review),
                            ("await_review", await_review), ("revalidate", revalidate),
@@ -446,7 +499,8 @@ def build_graph(runtime: Runtime, checkpointer):
     graph.add_conditional_edges("prepare_adoption", lambda s: "publish_review" if s["status"] == "PENDING_REVIEW" else "finalize",
                                 ["publish_review", "finalize"])
     graph.add_conditional_edges("investigate_context", investigation_route,
-                                ["investigate_context", "fetch_context", "select_strategy", "finalize"])
+                                ["investigate_context", "fetch_context", "lookup_exhausted", "select_strategy", "finalize"])
+    graph.add_edge("lookup_exhausted", "finalize")
     graph.add_conditional_edges("fetch_context", lambda s: "finalize" if s["status"] == "BLOCKED" else "build_facts",
                                 ["finalize", "build_facts"])
     graph.add_conditional_edges("select_strategy", lambda s: "finalize" if s["status"] in ("BLOCKED", "NO_CHANGE") else "plan_change",

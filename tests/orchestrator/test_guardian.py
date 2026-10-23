@@ -227,7 +227,7 @@ class ModuleTests(unittest.TestCase):
         class LookupModel(ScriptedModelClient):
             def generate(self, stage, payload, schema):
                 output = super().generate(stage, payload, schema)
-                if stage == "investigator":
+                if stage == "investigator" and payload["remaining_lookup_rounds"] > 0:
                     output["context_requests"] = [payload["allowed_lookup"]]
                 return output
         with self.open(model=LookupModel()) as (graph, runtime, store):
@@ -256,7 +256,7 @@ class ModuleTests(unittest.TestCase):
                 if self.counts[stage] == 1:
                     return {"invalid": "output requiring one repair"}
                 output = super().generate(stage, payload, schema)
-                if stage == "investigator":
+                if stage == "investigator" and payload["remaining_lookup_rounds"] > 0:
                     output["context_requests"] = [payload["allowed_lookup"], payload["allowed_lookup"]]
                 return output
         with self.open(model=RepairLookupModel()) as (graph, runtime, store):

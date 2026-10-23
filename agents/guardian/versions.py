@@ -5,18 +5,18 @@ from typing import Literal
 from contracts.usage_summary_v1 import Contract, ID
 from .prompts import PROMPT_VERSION, SCHEMA_VERSION
 
-GRAPH_VERSION = "guardian.graph.v5"
-STATE_VERSION = "guardian.state.v5"
-VALIDATOR_VERSION = "guardian.validator.v1"
+GRAPH_VERSION = "guardian.graph.v6"
+STATE_VERSION = "guardian.state.v6"
+VALIDATOR_VERSION = "guardian.validator.v2"
 CANONICALIZATION_VERSION = "guardian.sorted-json-sha256.v1"
 
 
 class RunVersions(Contract):
     # Required even when they have only one supported value: a legacy checkpoint
     # must not silently acquire the current versions through model defaults.
-    graph_version: Literal["guardian.graph.v5"]
-    state_version: Literal["guardian.state.v5"]
-    validator_version: Literal["guardian.validator.v1"]
+    graph_version: Literal["guardian.graph.v6"]
+    state_version: Literal["guardian.state.v6"]
+    validator_version: Literal["guardian.validator.v2"]
     canonicalization_version: Literal["guardian.sorted-json-sha256.v1"]
     policy_version: ID
     prompt_version: Literal["guardian.bounded-stages.v2"]

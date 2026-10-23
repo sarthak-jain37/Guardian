@@ -238,5 +238,3 @@ class LlamaCppModelClient(ProcessModelClient):
 
 class VllmModelClient(ProcessModelClient):
     producer = "vllm"
-
-

@@ -8,6 +8,7 @@ from pathlib import Path
 from ..contracts import AnalysisRequest, ApprovalDecision, EvidenceBundle, Proposal, RevisionRequest, utc_now
 from ..policy import canonical_hash
 from ..lifecycle import ProposalStatus
+from ..evidence_tools import AccessResult, ToolResult
 
 
 class LocalTestStore:
@@ -40,15 +41,67 @@ class LocalTestStore:
     def model_call_count(self, run_id: str) -> int:
         return self.connection.execute("SELECT count(*) FROM model_calls WHERE run_id=?", (run_id,)).fetchone()[0]
 
-    def reserve_model_call(self, run_id: str, stage: str, limit: int) -> int:
+    def model_repair_count(self, run_id, stage):
+        return self.connection.execute("SELECT count(*) FROM records WHERE kind='model_repair' AND id=?",
+                                       (canonical_hash([run_id, stage]),)).fetchone()[0]
+
+    def reserve_model_call(self, run_id: str, stage: str, limit: int, repair=False) -> int:
         # Commit the budget before inference, so a crashed call still consumes capacity.
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
             number = self.model_call_count(run_id) + 1
             if number > limit:
                 raise ValueError("model_budget_exhausted")
+            if repair:
+                if self.model_repair_count(run_id, stage):
+                    raise ValueError("stage_repair_budget_exhausted")
+                self.connection.execute("INSERT INTO records VALUES (?,?,?)",
+                                        ("model_repair", canonical_hash([run_id, stage]), "{}"))
             self.connection.execute("INSERT INTO model_calls VALUES (?,?,?)", (run_id, number, stage))
         return number
+
+    def reserve_lookup_batch(self, run_id, batch_key, requests, rounds, calls):
+        with self.connection:
+            self.connection.execute("BEGIN IMMEDIATE")
+            try:
+                existing = self.get("lookup_batch", batch_key)
+            except LookupError:
+                existing = None
+            if existing is not None:
+                if existing["run_id"] != run_id or [c["request"] for c in existing["calls"]] != requests:
+                    raise ValueError("lookup_reservation_mismatch")
+                return existing
+            previous = [json.loads(row[0]) for row in self.connection.execute("SELECT payload FROM records WHERE kind='lookup_batch'")]
+            previous = [r for r in previous if r["run_id"] == run_id]
+            count = sum(len(r["calls"]) for r in previous)
+            if len(previous) >= rounds or count + len(requests) > calls:
+                raise ValueError("lookup_budget_exhausted")
+            result = {"run_id": run_id, "round": len(previous) + 1, "total_calls": count + len(requests),
+                      "calls": [{"request": r, "started": False, "result": None} for r in requests]}
+            self.connection.execute("INSERT INTO records VALUES (?,?,?)", ("lookup_batch", batch_key, json.dumps(result)))
+        return result
+
+    def begin_lookup(self, batch_key, index):
+        with self.connection:
+            self.connection.execute("BEGIN IMMEDIATE")
+            batch = self.get("lookup_batch", batch_key)
+            entry = batch["calls"][index]
+            if entry["result"] is not None:
+                return entry["result"]
+            if entry["started"]:
+                raise ValueError("lookup_outcome_uncertain_after_restart")
+            entry["started"] = True
+            self.connection.execute("UPDATE records SET payload=? WHERE kind='lookup_batch' AND id=?", (json.dumps(batch), batch_key))
+        return None
+
+    def complete_lookup(self, batch_key, index, result):
+        with self.connection:
+            batch = self.get("lookup_batch", batch_key)
+            entry = batch["calls"][index]
+            if not entry["started"] or (entry["result"] is not None and entry["result"] != result):
+                raise ValueError("lookup_result_conflict")
+            entry["result"] = result
+            self.connection.execute("UPDATE records SET payload=? WHERE kind='lookup_batch' AND id=?", (json.dumps(batch), batch_key))
 
     def finalize_run(self, run_id: str, result: dict):
         return self.put_once("outcome", run_id, result)
@@ -196,6 +249,20 @@ class FixtureEvidencePort:
             raise ValueError("lookup outside allowed case")
         self.context_fetches += 1
         return self.load(request)
+
+    def lookup(self, request, lookup, *, timeout_seconds):
+        e = self.evidence
+        base = {"tool": lookup.tool, "case_id": request.case_id, "subject_id": e.subject.username,
+                "target_uid": e.target.uid, "evidence_refs": ["fixture-tool-source"], "reasons": []}
+        if e.source_mode != "fixture" and lookup.tool in ("get_failure_history", "check_access"):
+            return ToolResult(**{**base, "status": "unavailable", "reasons": ["backend_tool_unavailable"]})
+        if lookup.tool == "get_failure_history":
+            return ToolResult(**base, status="available", failures=[])
+        if lookup.tool == "check_access":
+            return ToolResult(**base, status="available", access=AccessResult(
+                permission_id=lookup.permission_id, allowed=None, denied=None, evaluation_error="fixture_check_not_performed"))
+        evidence = self.fetch_context(request, lookup) if lookup.tool == "get_workload_context" else self.current(request)
+        return ToolResult(**base, status="available", evidence=evidence)
 
 
 class SimulatedVerificationPort:
