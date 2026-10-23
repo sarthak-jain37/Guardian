@@ -317,8 +317,8 @@ class ApprovalDecision(Contract):
 
 
 class AnalysisReport(Contract):
-    schema_version: Literal["guardian.report.v4"] = "guardian.report.v4"
-    graph_version: Literal["guardian.graph.v4"]
+    schema_version: Literal["guardian.report.v5"] = "guardian.report.v5"
+    graph_version: Literal["guardian.graph.v5"]
     versions: RunVersions
     case_id: ID
     run_id: ID

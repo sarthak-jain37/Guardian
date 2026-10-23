@@ -11,7 +11,8 @@ from langgraph.types import Command
 
 from .adapters.local import (FixtureEvidencePort, LocalTestStore, PreviewVerificationPort,
                              RecordingBaselinePort, RecordingExecutor, SimulatedVerificationPort)
-from .adapters.models import LlamaCppModelClient, ScriptedModelClient
+from .adapters.models import LlamaCppModelClient, ScriptedModelClient, VllmModelClient
+from .modeling import ModelConfig, load_profile
 from .contracts import AnalysisRequest, EvidenceBundle, utc_now
 from .fixtures import demo_evidence
 from .graph import Runtime, build_graph, report
@@ -46,19 +47,32 @@ def config(run_id):
 
 def configured_model(settings):
     settings = dict(settings)
-    if settings.get("provider") == "scripted":
-        return ScriptedModelClient(), {"provider": "scripted"}
-    if settings.get("provider") != "llama-cpp":
-        raise ValueError("unsupported_model_provider")
-    import os
-    from dotenv import load_dotenv
-    load_dotenv()
-    model_path = settings.get("model_path") or os.environ.get("MODEL_PATH")
-    if not model_path:
-        raise ValueError("llama-cpp needs --model-path or MODEL_PATH")
-    settings.update(model_path=str(Path(model_path).expanduser().resolve()))
-    return LlamaCppModelClient(settings["model_path"], timeout_seconds=settings.get("timeout", 180),
-                              threads=settings.get("threads", 4)), settings
+    if "profile" not in settings:
+        provider = settings.get("provider")
+        if provider == "scripted":
+            settings = ModelConfig().model_dump(mode="json")
+        elif provider == "llama-cpp":
+            import os
+            from dotenv import load_dotenv
+            load_dotenv()
+            path = settings.get("model_path") or os.environ.get("MODEL_PATH")
+            if not path:
+                raise ValueError("llama-cpp needs --model-path or MODEL_PATH")
+            settings = ModelConfig(profile="dev-laptop", provider="llama-cpp", model_name=Path(path).name,
+                                   model_path=str(Path(path).expanduser().resolve()),
+                                   request_timeout_seconds=settings.get("timeout", 180),
+                                   threads=settings.get("threads", 4)).model_dump(mode="json")
+        else:
+            raise ValueError("unsupported_model_provider")
+    config = ModelConfig.model_validate(settings)
+    if config.provider == "scripted":
+        model = ScriptedModelClient()
+        model.config = config
+    elif config.provider == "llama-cpp":
+        model = LlamaCppModelClient(config.model_path, config=config)
+    else:
+        model = VllmModelClient(config)
+    return model, config.model_dump(mode="json")
 
 
 def start_successor(graph, ticket):
@@ -104,6 +118,7 @@ def main(argv=None):
     start.add_argument("--timeout", type=int, default=180)
     start.add_argument("--threads", type=int, default=4)
     start.add_argument("--intent", choices=["analyze", "adopt_baseline"], default="analyze")
+    start.add_argument("--profile", type=Path, help="strict TOML model/worker profile")
     sub.add_parser("status")
     sub.add_parser("renew", help="request a fresh revision after unused review/approval expiry")
     sub.add_parser("next", help="run the recorded successor revision; never carries old authority")
@@ -136,8 +151,9 @@ def main(argv=None):
                                   mode="preview" if args.evidence else "simulation")
         (directory / "evidence.json").write_text(evidence.model_dump_json(indent=2))
         try:
-            model, model_config = configured_model({"provider": args.model, "model_path": args.model_path,
-                                                     "timeout": args.timeout, "threads": args.threads})
+            settings = load_profile(args.profile).model_dump(mode="json") if args.profile else {
+                "provider": args.model, "model_path": args.model_path, "timeout": args.timeout, "threads": args.threads}
+            model, model_config = configured_model(settings)
         except ValueError as exc:
             parser.error(str(exc))
         with open_runner(directory, model, evidence) as (graph, runtime, store):

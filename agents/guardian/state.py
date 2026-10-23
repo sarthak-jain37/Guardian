@@ -29,4 +29,5 @@ class GuardianState(TypedDict, total=False):
     readiness: dict | None
     revision_request: dict | None
     analysis_producer: str
+    model_config_hash: str
     started_at: str

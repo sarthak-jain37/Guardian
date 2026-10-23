@@ -16,6 +16,7 @@ from .review import adoption_gates, adoption_proposal, checked_gates
 from .revisions import prepare_revision, read_evidence
 from .state import GuardianState
 from .versions import GRAPH_VERSION, current_versions, require_compatible_state
+from .modeling import call_model, model_config
 
 
 @dataclass
@@ -66,6 +67,7 @@ def build_graph(runtime: Runtime, checkpointer):
                 "model_status": "not_called", "investigation": None, "plan": None,
                 "proposal": None, "receipt": None, "readiness": None, "revision_request": None,
                 "analysis_producer": runtime.model.producer,
+                "model_config_hash": model_config(runtime.model).fingerprint(),
                 "trace": event(state, "accept_case", graph_version=GRAPH_VERSION)}
 
     def load_evidence(state):
@@ -133,6 +135,9 @@ def build_graph(runtime: Runtime, checkpointer):
         if (source.approval_hash != ticket.source_approval_hash or source.case_id != state["request"]["case_id"]
                 or previous["versions"] != state["versions"]):
             return {"status": "BLOCKED", "reason": "incompatible_revision_source", "trace": event(state, "restore_analysis", outcome="blocked")}
+        hashes = {t["model_result"]["config_hash"] for t in previous["trace"] if t.get("model_result")}
+        if hashes and hashes != {state["model_config_hash"]}:
+            return {"trace": event(state, "restore_analysis", outcome="reanalyze_configuration_changed")}
         try:
             investigation = Investigation.model_validate(previous["investigation"])
             plan = ChangePlan.model_validate(previous["plan"])
@@ -158,7 +163,13 @@ def build_graph(runtime: Runtime, checkpointer):
         repairs_key = "investigator_repairs" if stage == "investigator" else "planner_repairs"
         output_type = Investigation if stage == "investigator" else ChangePlan
         elapsed = (runtime.clock() - datetime.fromisoformat(state["started_at"])).total_seconds()
-        if count >= e.policy.model_calls or elapsed >= e.policy.active_run_timeout_seconds:
+        settings = model_config(runtime.model)
+        if settings.fingerprint() != state.get("model_config_hash"):
+            return {"model_status": "configuration_changed", "model_calls": count, "retry_stage": False,
+                    "status": "BLOCKED", "reason": "model_configuration_changed",
+                    "trace": event(state, stage, outcome="configuration_changed")}
+        active_limit = min(e.policy.active_run_timeout_seconds, settings.active_run_timeout_seconds)
+        if count >= e.policy.model_calls or elapsed >= active_limit:
             return {"model_status": "budget_exhausted", "model_calls": count, "retry_stage": False, "status": "BLOCKED",
                     "reason": "model_budget_exhausted", "trace": event(state, stage, outcome="budget_exhausted")}
         payload = {"stage": stage, "facts": state["facts"], "deterministic_risk": state["risk"],
@@ -173,7 +184,11 @@ def build_graph(runtime: Runtime, checkpointer):
         if runtime.budget:
             count = runtime.budget.reserve_model_call(state["request"]["run_id"], stage, e.policy.model_calls) - 1
         try:
-            output = output_type.model_validate(runtime.model.generate(stage, payload, output_type.model_json_schema()))
+            result = call_model(runtime.model, stage, payload, output_type.model_json_schema(),
+                                min(settings.request_timeout_seconds, active_limit - elapsed))
+            if result.error:
+                raise ValueError(result.error)
+            output = output_type.model_validate(result.response)
             if stage == "investigator":
                 validate_investigation(output, state["facts"], e)
             else:
@@ -186,13 +201,12 @@ def build_graph(runtime: Runtime, checkpointer):
                     "reason": f"{type(exc).__name__}: {str(exc)[:300]}",
                     "status": "ANALYZING" if retry else "BLOCKED",
                     "trace": event(state, stage, outcome="invalid_or_unavailable", repair=retry,
-                                   model_attempt=getattr(runtime.model, "attempts", [])[-1:])}
+                                   model_result=result.model_dump(mode="json") if "result" in locals() else None)}
         key = "investigation" if stage == "investigator" else "plan"
         return {key: output.model_dump(mode="json"), "model_calls": count + 1,
                 "model_status": f"{stage}_valid", "retry_stage": False, "reason": None,
                 "trace": event(state, stage, outcome="validated", producer=runtime.model.producer,
-                               model_attempt=getattr(runtime.model, "attempts", [])[-1:],
-                               metadata=getattr(runtime.model, "metadata", [])[-1:] if runtime.model.producer != "scripted-test" else [])}
+                               model_result=result.model_dump(mode="json"))}
 
     def investigate_context(state):
         return model_stage(state, "investigator")
@@ -278,7 +292,8 @@ def build_graph(runtime: Runtime, checkpointer):
                                        "patch": rendered["patch"], "policy": e.policy.model_dump(),
                                        "verification": plan.verification_profile_id, "recovery_authorized": False,
                                        "uncertainty": state["investigation"]["uncertainty"],
-                                       "versions": state["versions"], "simulation": simulation})
+                                       "versions": state["versions"], "model_config_hash": state["model_config_hash"],
+                                       "simulation": simulation})
         proposal = Proposal(proposal_id=f"proposal-{req.run_id}-r{req.revision}", case_id=req.case_id, run_id=req.run_id,
                             revision=req.revision, simulation=simulation, status="PENDING_APPROVAL" if ready else "BLOCKED",
                             target=e.target, unchanged_binding=e.binding, evidence_hash=evidence_hash, candidate_hash=candidate_hash,

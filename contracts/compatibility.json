@@ -1,16 +1,18 @@
 {
   "schema_version": "guardian.contract-compatibility.v1",
-  "release": "guardian.review-routes.v1",
+  "release": "guardian.model-tools-worker.v1",
   "status": "proposed_pending_component_acceptance",
   "source_plan": "Guardian Final Team Architecture and Implementation Plan v4.0",
-  "base_commit": "33d202d",
+  "base_commit": "d56fb5b",
   "release_commit": null,
-  "decision_record": "contracts/decisions/0002-review-routes.md",
+  "decision_record": "contracts/decisions/0003-model-tools-worker.md",
   "runtime_versions": {
-    "graph_version": "guardian.graph.v4",
-    "state_version": "guardian.state.v4",
+    "graph_version": "guardian.graph.v5",
+    "state_version": "guardian.state.v5",
     "validator_version": "guardian.validator.v1",
-    "canonicalization_version": "guardian.sorted-json-sha256.v1"
+    "canonicalization_version": "guardian.sorted-json-sha256.v1",
+    "prompt_version": "guardian.bounded-stages.v2",
+    "model_output_version": "guardian.model-output.v2"
   },
   "contracts": [
     {
@@ -44,7 +46,7 @@
     },
     {
       "name": "report",
-      "schema_id": "guardian.report.v4",
+      "schema_id": "guardian.report.v5",
       "producer": "orchestration",
       "consumers": [
         "backend",
@@ -113,6 +115,24 @@
       "name": "revision_request",
       "schema_id": "guardian.revision-request.v1",
       "producer": "backend_review_coordination",
+      "consumers": [
+        "orchestration_worker"
+      ],
+      "acceptance": "pending"
+    },
+    {
+      "name": "model_config",
+      "schema_id": "guardian.model-config.v1",
+      "producer": "orchestration_model_adapter",
+      "consumers": [
+        "orchestration_worker"
+      ],
+      "acceptance": "pending"
+    },
+    {
+      "name": "model_result",
+      "schema_id": "guardian.model-result.v1",
+      "producer": "orchestration_model_adapter",
       "consumers": [
         "orchestration_worker"
       ],

@@ -3,9 +3,10 @@
 from typing import Literal
 
 from contracts.usage_summary_v1 import Contract, ID
+from .prompts import PROMPT_VERSION, SCHEMA_VERSION
 
-GRAPH_VERSION = "guardian.graph.v4"
-STATE_VERSION = "guardian.state.v4"
+GRAPH_VERSION = "guardian.graph.v5"
+STATE_VERSION = "guardian.state.v5"
 VALIDATOR_VERSION = "guardian.validator.v1"
 CANONICALIZATION_VERSION = "guardian.sorted-json-sha256.v1"
 
@@ -13,18 +14,21 @@ CANONICALIZATION_VERSION = "guardian.sorted-json-sha256.v1"
 class RunVersions(Contract):
     # Required even when they have only one supported value: a legacy checkpoint
     # must not silently acquire the current versions through model defaults.
-    graph_version: Literal["guardian.graph.v4"]
-    state_version: Literal["guardian.state.v4"]
+    graph_version: Literal["guardian.graph.v5"]
+    state_version: Literal["guardian.state.v5"]
     validator_version: Literal["guardian.validator.v1"]
     canonicalization_version: Literal["guardian.sorted-json-sha256.v1"]
     policy_version: ID
+    prompt_version: Literal["guardian.bounded-stages.v2"]
+    model_output_version: Literal["guardian.model-output.v2"]
 
 
 def current_versions(policy_version: str) -> RunVersions:
     return RunVersions(graph_version=GRAPH_VERSION, state_version=STATE_VERSION,
                        validator_version=VALIDATOR_VERSION,
                        canonicalization_version=CANONICALIZATION_VERSION,
-                       policy_version=policy_version)
+                       policy_version=policy_version, prompt_version=PROMPT_VERSION,
+                       model_output_version=SCHEMA_VERSION)
 
 
 class IncompatibleRunError(ValueError):

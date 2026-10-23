@@ -3,6 +3,7 @@
 from typing import Protocol
 
 from .contracts import AnalysisRequest, ApprovalDecision, ContextLookup, EvidenceBundle, Proposal, RevisionRequest
+from .modeling import ModelConfig, ModelResult
 
 
 class EvidencePort(Protocol):
@@ -13,7 +14,8 @@ class EvidencePort(Protocol):
 
 class ModelClient(Protocol):
     producer: str
-    def generate(self, stage: str, payload: dict, output_schema: dict) -> dict: ...
+    def generate(self, stage: str, messages: list[dict], output_schema: dict, config: ModelConfig,
+                 *, timeout_seconds: float) -> ModelResult: ...
 
 
 class BudgetPort(Protocol):
