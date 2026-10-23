@@ -16,7 +16,7 @@ from .review import adoption_gates, adoption_proposal, checked_gates
 from .revisions import prepare_revision, read_evidence
 from .state import GuardianState
 from .versions import GRAPH_VERSION, current_versions, require_compatible_state
-from .modeling import call_model, model_config
+from .modeling import call_model, model_config, model_input
 from .evidence_tools import allowed_lookups, validate_lookup, validate_result
 
 
@@ -218,13 +218,15 @@ def build_graph(runtime: Runtime, checkpointer):
                     "reason": f"{type(exc).__name__}: {str(exc)[:300]}",
                     "status": "ANALYZING" if retry else "BLOCKED",
                     "trace": event(state, stage, outcome="invalid_or_unavailable", repair=retry,
-                                   model_result=result.model_dump(mode="json") if "result" in locals() else None)}
+                                   model_result=result.model_dump(mode="json") if "result" in locals() else None,
+                                   model_input=model_input(stage, payload, output_type.model_json_schema(), runtime.model))}
         key = "investigation" if stage == "investigator" else "plan"
         return {key: output.model_dump(mode="json"), "model_calls": count + 1,
                 repairs_key: runtime.budget.model_repair_count(state["request"]["run_id"], stage),
                 "model_status": f"{stage}_valid", "retry_stage": False, "reason": None,
                 "trace": event(state, stage, outcome="validated", producer=runtime.model.producer,
-                               model_result=result.model_dump(mode="json"))}
+                               model_result=result.model_dump(mode="json"),
+                               model_input=model_input(stage, payload, output_type.model_json_schema(), runtime.model))}
 
     def investigate_context(state):
         return model_stage(state, "investigator")
@@ -310,18 +312,21 @@ def build_graph(runtime: Runtime, checkpointer):
         candidate_hash = canonical_hash({"target_uid": e.target.uid, "namespace": e.target.namespace,
                                         "strategy": plan.strategy_id, "rules": rendered["result_rules"]})
         gates = global_gates(e, runtime.clock())
+        verification = checked_gates(runtime.verification.check(e, rendered["result_rules"]), "verification_unavailable")
         failures = [f for result in state["tool_results"] for f in result.get("failures", [])]
         blocked = any(f["blocks_candidate"] and f["candidate_hash"] == candidate_hash
                       and f["target_uid"] == e.target.uid and f["policy_version"] == e.policy.policy_version
                       and e.context and f["workload_uid"] == e.context.workload_uid and f["image_digest"] == e.context.image_digest
                       for f in failures)
-        gates.append(Gate(gate_id="candidate_failure_history", result="fail" if blocked else "pass",
-                          reasons=["prior_candidate_failure"] if blocked else []))
+        history_available = (any(r["tool"] == "get_failure_history" and r["status"] == "available" for r in state["tool_results"])
+                             or any(g.gate_id in ("failure_history", "simulated_failure_history") and g.result == "pass" for g in verification))
+        gates.append(Gate(gate_id="candidate_failure_history", result="fail" if blocked else "pass" if history_available else "unknown",
+                          reasons=["prior_candidate_failure"] if blocked else [] if history_available else ["failure_history_unavailable"]))
         current_facts, _ = build_facts(e, runtime.clock())
         eligible = {f["permission_id"] for f in current_facts if f["eligible"]}
         gates.append(Gate(gate_id="removal_evidence", result="pass" if removed <= eligible else "fail",
                           reasons=[] if removed <= eligible else ["removal_no_longer_eligible"]))
-        gates.extend(checked_gates(runtime.verification.check(e, rendered["result_rules"]), "verification_unavailable"))
+        gates.extend(verification)
         ready = all(g.result == "pass" for g in gates)
         req = AnalysisRequest.model_validate(state["request"])
         simulation = req.mode == "simulation"

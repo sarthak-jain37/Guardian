@@ -1,6 +1,6 @@
 # 0003: Model, bounded evidence and worker contracts
 
-Status: orchestration implementation in progress; component acceptance pending.
+Status: orchestration module implemented; component acceptance pending.
 
 Phase 3 versions model profiles/prompts and records strict ModelResult envelopes.
 Real providers accept messages, output schema and validated ModelConfig. Raw
@@ -45,3 +45,19 @@ round/call budgets. Completed results are cached for checkpoint replay; an issue
 read whose response was lost produces an explicit uncertain outcome rather than
 a blind repeat. Exhausted unresolved lookups publish findings and finish blocked.
 Graph/state/report advance to v6 and validator v2 for these semantics.
+
+WorkItem/WorkOutcome v1 define analysis, stored-decision resume and stored-revision
+delivery. A standalone single-job worker resumes checkpoints and acknowledges
+durable review waiting without retaining an inference session. Its bounded
+in-memory recording queue/file CLI are test adapters. The backend owns durable
+delivery, leases, scheduling and production queue service; none is implemented
+inside FastAPI or audit ingestion. The local worker uses an exclusive directory
+lock; deployments still need backend coordination across workers/targets.
+
+Sanitized stage messages and requested schemas are retained in the bounded trace
+with input/schema hashes and exact result metadata. Oversized inputs are marked
+omitted with their hash/byte count and do not reach inference. Profile settings
+are saved outside checkpoints. Runtime-supported tool schemas constrain actual
+case IDs and prohibit unrelated argument combinations, followed by independent
+scope/semantic validation. The raw model path and service credentials are never
+available to the model as tools.

@@ -105,7 +105,7 @@ def validate_result(raw, lookup, request, evidence):
             allowed.add("context")
             if evidence.context is None or refreshed.context is None:
                 raise ValueError("consumer_context_unavailable")
-            fields = {"known_consumers", "consumer_inventory_complete", "alternate_grants"}
+            fields = {"known_consumers", "consumer_inventory_complete", "alternate_grants", "collected_at", "evidence_refs"}
             if evidence.context.model_dump(exclude=fields) != refreshed.context.model_dump(exclude=fields):
                 raise ValueError("consumer_lookup_changed_other_context")
         for field in EvidenceBundle.model_fields:

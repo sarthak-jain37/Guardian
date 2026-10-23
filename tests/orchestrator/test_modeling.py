@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 from pydantic import ValidationError
 
 from agents.guardian.adapters.models import ScriptedModelClient, VllmModelClient, completion_output, remote_completion
-from agents.guardian.modeling import ModelConfig, ModelResult, call_model, load_profile
+from agents.guardian.modeling import ModelConfig, ModelResult, call_model, load_profile, scoped_schema
 from agents.guardian.prompts import PROMPT_VERSION, messages
 from agents.guardian.runner import configured_model
 
@@ -48,6 +48,30 @@ class ModelBoundaryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             messages("executor", payload)
 
+    def test_structured_lookup_schema_rejects_unrelated_tool_arguments(self):
+        from jsonschema import Draft202012Validator
+        from agents.guardian.contracts import ContextLookup
+        source = {"$defs": {"ContextLookup": ContextLookup.model_json_schema()}, "$ref": "#/$defs/ContextLookup"}
+        menu = [{"tool": "get_workload_context", "case_id": "case-1", "subject_id": "subject-1"}]
+        validator = Draft202012Validator(scoped_schema(source, {"allowed_lookups": menu}))
+        validator.validate(menu[0])
+        self.assertTrue(list(validator.iter_errors({**menu[0], "target_uid": "unexpected"})))
+        self.assertTrue(list(validator.iter_errors({**menu[0], "subject_id": "other-subject"})))
+
+    def test_zero_remaining_lookups_are_enforced_in_the_runtime_schema(self):
+        from jsonschema import Draft202012Validator
+        from agents.guardian.contracts import Investigation
+        from agents.guardian.adapters.models import runtime_schema
+        menu = [{"tool": "get_workload_context", "subject_id": "subject-1"}]
+        payload = {"facts": [{"permission_id": "p1", "eligible": False, "protected": True,
+                              "reason_codes": ["observed_use"], "evidence_ids": ["e1"]}],
+                   "allowed_lookup": menu[0], "allowed_lookups": menu, "remaining_lookup_rounds": 0}
+        output = ScriptedModelClient().generate("investigator", payload, {})
+        schema = runtime_schema(scoped_schema(Investigation.model_json_schema(), payload), payload)
+        validator = Draft202012Validator(schema)
+        validator.validate(output)
+        self.assertTrue(list(validator.iter_errors({**output, "context_requests": menu})))
+
     def test_scripted_output_has_explicit_result_provenance(self):
         result = call_model(ScriptedModelClient([{"answer": "fixture"}]), "investigator", {}, {}, 1)
         self.assertEqual(result.producer, "scripted-test")
@@ -55,6 +79,8 @@ class ModelBoundaryTests(unittest.TestCase):
         self.assertEqual(result.response, {"answer": "fixture"})
         self.assertIsNone(result.error)
         self.assertIsNone(result.input_tokens)
+        self.assertTrue(result.input_hash.startswith("sha256:"))
+        self.assertTrue(result.output_schema_hash.startswith("sha256:"))
 
     def test_input_and_output_bounds_are_visible_failures(self):
         model = ScriptedModelClient([{"output": "x" * 5000}])
@@ -123,6 +149,14 @@ class ModelBoundaryTests(unittest.TestCase):
         self.assertIsInstance(model, VllmModelClient)
         self.assertEqual(ModelConfig.model_validate(settings).fingerprint(), model.config.fingerprint())
         self.assertIsNone(model.process)
+
+    def test_missing_local_file_is_handled_at_inference_not_review_startup(self):
+        config = ModelConfig(profile="dev-laptop", provider="llama-cpp", model_name="missing",
+                             model_path="/nonexistent/guardian-test-model.gguf")
+        model, saved = configured_model(config.model_dump(mode="json"))
+        self.assertEqual(saved["provider"], "llama-cpp")
+        self.assertIsNone(model.process)
+        model.close()
 
 
 if __name__ == "__main__":

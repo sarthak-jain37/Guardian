@@ -155,6 +155,24 @@
         "orchestration_worker"
       ],
       "acceptance": "pending"
+    },
+    {
+      "name": "work_item",
+      "schema_id": "guardian.work-item.v1",
+      "producer": "orchestration_worker",
+      "consumers": [
+        "backend_delivery"
+      ],
+      "acceptance": "pending"
+    },
+    {
+      "name": "work_outcome",
+      "schema_id": "guardian.work-outcome.v1",
+      "producer": "orchestration_worker",
+      "consumers": [
+        "backend_delivery"
+      ],
+      "acceptance": "pending"
     }
   ]
 }

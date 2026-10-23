@@ -53,7 +53,8 @@ def runtime_schema(schema, payload):
     def visit(value):
         if isinstance(value, dict):
             for key in ["maxLength", "minLength", "maxItems"]:
-                value.pop(key, None)
+                if key != "maxItems" or value.get(key) != 0:
+                    value.pop(key, None)
             for child in value.values():
                 visit(child)
         elif isinstance(value, list):
@@ -79,7 +80,9 @@ def runtime_schema(schema, payload):
         schema["properties"][field] = {"type": "array", "prefixItems": entries,
                                        "minItems": len(entries), "maxItems": len(entries)}
     if "ContextLookup" in schema.get("$defs", {}):
-        schema["$defs"]["ContextLookup"]["properties"]["subject_id"]["enum"] = [payload["allowed_lookup"]["subject_id"]]
+        properties = schema["$defs"]["ContextLookup"].get("properties")
+        if properties:
+            properties["subject_id"]["enum"] = [payload["allowed_lookup"]["subject_id"]]
     if "target_id" in schema.get("properties", {}):
         schema["properties"]["target_id"]["enum"] = [payload["target_uid"]]
     return schema
@@ -231,8 +234,6 @@ class LlamaCppModelClient(ProcessModelClient):
         config = config or ModelConfig(profile="dev-laptop", provider="llama-cpp", model_name=Path(model_path).name,
                                       model_path=str(Path(model_path).resolve()), request_timeout_seconds=timeout_seconds,
                                       context_length=context_length, threads=threads)
-        if not Path(config.model_path).is_file():
-            raise ValueError("model file does not exist")
         super().__init__(config)
 
 

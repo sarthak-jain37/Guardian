@@ -275,7 +275,7 @@ class SimulatedVerificationPort:
         if evidence.source_mode != "fixture":
             raise ValueError("simulated checks accept fixtures only")
         return [{"gate_id": name, "result": "pass", "reasons": []}
-                for name in ["simulated_dry_run", "simulated_functional_profile", "simulated_pause_and_authorization"]]
+                for name in ["simulated_dry_run", "simulated_functional_profile", "simulated_pause_and_authorization", "simulated_failure_history"]]
 
 
 class PreviewVerificationPort:

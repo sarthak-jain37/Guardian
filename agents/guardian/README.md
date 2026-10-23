@@ -1,31 +1,32 @@
 # Guardian LangGraph module demo
 
-## Plan v4 phases 1–2
+## Plan v4 phases 1–3
 
 Phase 2 adds explicit snapshot adoption using `start --intent adopt_baseline`.
 It skips the model and can reach review without usage telemetry or a removal
 candidate. `decide adopt_baseline` authorizes only that exact adoption. The
 recording baseline adapter records a local test request with
 `baseline_activated=false`; it performs no Kubernetes write. Captured exports
-remain previews. Request/report schemas and graph/state versions are now v4;
+remain previews. Requests use v4; reports and graph/state use v6;
 proposal/test-decision schemas are v2. See contract decision 0002.
 
 Phase 1 supplies strict contracts and checkpoint compatibility. Phase 2 supplies
 adoption routing, durable context revision requests, expired-review renewal and
-report/readiness publication. Model/tool expansion, backend governance adapters
-and real-model/lab integration remain later phases. The personal phase plan stays
+report/readiness publication. Phase 3 adds versioned prompts/profiles, typed model
+results, six scoped evidence tools and a standalone worker. Backend governance
+adapters and real-model/lab integration remain later phases. The personal phase plan stays
 in Git-ignored `personal_docs/langgraph-part2-phases.md`.
 
 Requests use `guardian.analysis-request.v4` and bind the optional baseline and
 policy version as well as snapshot/cluster/target UID. Reports use
-`guardian.report.v4` with typed permission facts, readiness and runtime versions.
+`guardian.report.v6` with typed permission facts, readiness and runtime versions.
 The three lifecycle vocabularies are separate; defining their values does not
 implement backend lifecycle persistence. The graph independently validates exports
 from every evidence adapter before analysis.
 
-`schema` exports all eleven boundary/model schemas from the runtime definitions.
+`schema` exports all seventeen boundary/model/worker schemas from the runtime definitions.
 See `contracts/compatibility.json` and
-`contracts/decisions/0002-review-routes.md` for producer/consumer review
+`contracts/decisions/0003-model-tools-worker.md` for producer/consumer review
 status and wire versions. Shared component acceptance is pending. Production
 decision/verification/recovery/receipt integration belongs to subsequent phases;
 the exported test-decision contract remains simulation-only.
@@ -66,6 +67,71 @@ export MODEL_PATH=/absolute/path/to/model.gguf
 ```
 
 The adapter initializes lazily in a separate process with a per-request deadline. It uses CPU inference, recorded decoding settings, a bounded context, and schema-constrained JSON followed by independent Pydantic/reference/eligibility validation. Runtime string bounds are omitted from the llama.cpp grammar to avoid its grammar-expansion limit; they remain enforced by the independent validator. The grammar requires one assessment per supplied permission ID without choosing its action. Runtime failure never becomes a scripted success.
+
+## Model profiles and stage records
+
+`config/test.toml`, `config/dev-laptop.toml` and `config/lab.toml` are strict worker
+profiles. Replace the local file or approved vLLM endpoint/model/revision before
+using a real profile. The lab file is a configuration example, not a selected
+model or an implemented university service. The first worker supports one job at
+a time with a finite input queue; larger concurrency requires a measured profile
+and backend coordination.
+
+```bash
+uv run --no-sync python -m agents.guardian.runner --directory personal_docs/profile-demo start --profile agents/guardian/config/test.toml
+```
+
+Prompts and model-output schema versions are part of checkpoint compatibility.
+Each stage records its configuration fingerprint, exact bounded sanitized input
+messages/schema, response or stable error, requested and observed model identity,
+available token counts and duration. Unknown resolved revisions remain null.
+Provider exception strings and service credentials are not copied into reports.
+Oversized inputs are marked omitted with hash/byte count and are not sent to the
+model; oversized or truncated outputs fail explicitly. Configured context size
+does not verify a remote server's actual context capacity, and no prompt is
+silently truncated. llama.cpp startup and inference share one request deadline.
+
+The optional vLLM adapter uses JSON Schema at the configured service. Credentials
+are read only from the named worker environment variable; endpoint redirects and
+embedded credentials/query strings are rejected. Neither real adapter initializes
+a model at import. Missing local files or unavailable services become explicit
+model-stage failures, preserving deterministic findings.
+
+The six tools are `get_case_snapshot`, `get_workload_context`, `get_usage_summary`,
+`get_binding_consumers`, `get_failure_history` and `check_access`. Their arguments
+come from known case/subject/target/permission/query IDs. They expose no shell,
+filesystem, arbitrary URL, Secret-body or mutation interface. SAR results cannot
+manufacture workload request counts. Scoped prior failures protect their exact
+candidate/workload context. Missing backend history is unknown; the fixture's
+verification adapter explicitly labels its history check simulated.
+
+Model invocation/repair and lookup round/call reservations commit before work.
+Only one repair per stage is allowed across all follow-ups and restarts. Cached
+tool results survive checkpoint replay; a dispatched lookup with a lost outcome
+finishes blocked instead of repeating blindly. Unresolved lookup requests at the
+two-round/four-call limit finish with findings and `lookup_budget_exhausted`.
+The maximum supported route still fits the recursion limit of 32.
+
+## Standalone worker handoff
+
+`worker.py` consumes strict `WorkItem` deliveries independently of FastAPI and audit
+ingestion. Analysis carries an AnalysisRequest; resume carries only a stored
+decision ID; revision carries only a stored RevisionRequest ID. Delivery itself
+does not supply authority. Duplicate deliveries recover existing checkpoints.
+Human waiting acknowledges the current job and closes its model session; the
+backend later delivers a separate decision job.
+
+```bash
+uv run --no-sync python -m agents.guardian.worker --directory personal_docs/worker-demo --item /absolute/path/work-item.json --profile agents/guardian/config/test.toml
+```
+
+For the file test handoff, the directory contains its sanitized `evidence.json`.
+Generate the WorkItem schema with `runner schema`; the request must match that
+evidence. The CLI uses a bounded recording queue and an exclusive local-directory
+lock. `WorkQueuePort` defines receive/acknowledge/fail for a real integration. The
+backend owner supplies durable queue/outbox delivery, leases, scope authorization
+and retry scheduling; the in-memory adapter is not a production queue. Separate
+worker processes do not establish a cross-service transaction or target lease.
 
 ## Demo commands
 

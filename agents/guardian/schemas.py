@@ -7,6 +7,7 @@ from .contracts import (AnalysisReport, AnalysisRequest, ApprovalDecision, Chang
 from .versions import RunVersions
 from .modeling import ModelConfig, ModelResult
 from .evidence_tools import ToolResult
+from .work import WorkItem, WorkOutcome
 
 SCHEMA_MODELS = {
     "usage": ("guardian.usage-summary.v1", UsageSummary),
@@ -24,6 +25,8 @@ SCHEMA_MODELS = {
     "model_result": ("guardian.model-result.v1", ModelResult),
     "evidence_tool_request": ("guardian.evidence-tool-request.v1", ContextLookup),
     "evidence_tool_result": ("guardian.evidence-tool-result.v1", ToolResult),
+    "work_item": ("guardian.work-item.v1", WorkItem),
+    "work_outcome": ("guardian.work-outcome.v1", WorkOutcome),
 }
 
 
