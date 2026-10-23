@@ -27,4 +27,6 @@ class GuardianState(TypedDict, total=False):
     trace: list[dict[str, Any]]
     receipt: dict | None
     readiness: dict | None
+    revision_request: dict | None
+    analysis_producer: str
     started_at: str

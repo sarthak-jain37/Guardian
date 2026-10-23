@@ -15,6 +15,8 @@ from .adapters.models import LlamaCppModelClient, ScriptedModelClient
 from .contracts import AnalysisRequest, EvidenceBundle, utc_now
 from .fixtures import demo_evidence
 from .graph import Runtime, build_graph, report
+from .policy import canonical_hash
+from .revisions import renew_review
 from .versions import IncompatibleRunError, require_compatible_state
 
 
@@ -42,14 +44,51 @@ def config(run_id):
     return {"configurable": {"thread_id": run_id}, "recursion_limit": 32}
 
 
+def configured_model(settings):
+    settings = dict(settings)
+    if settings.get("provider") == "scripted":
+        return ScriptedModelClient(), {"provider": "scripted"}
+    if settings.get("provider") != "llama-cpp":
+        raise ValueError("unsupported_model_provider")
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
+    model_path = settings.get("model_path") or os.environ.get("MODEL_PATH")
+    if not model_path:
+        raise ValueError("llama-cpp needs --model-path or MODEL_PATH")
+    settings.update(model_path=str(Path(model_path).expanduser().resolve()))
+    return LlamaCppModelClient(settings["model_path"], timeout_seconds=settings.get("timeout", 180),
+                              threads=settings.get("threads", 4)), settings
+
+
+def start_successor(graph, ticket):
+    next_config = config(ticket.request.run_id)
+    existing = graph.get_state(next_config)
+    if not existing.values:
+        return graph.invoke({"request": ticket.request.model_dump(mode="json")}, next_config)
+    require_compatible_state(existing.values)
+    if existing.next and not any(task.interrupts for task in existing.tasks):
+        return graph.invoke(None, next_config)
+    return existing.values
+
+
 def export_result(directory, state, runtime):
     directory = Path(directory)
     payload = report(state, runtime)
-    payload.update(proposal=state.get("proposal"), receipt=state.get("receipt"))
-    (directory / "result.json").write_text(json.dumps(payload, indent=2) + "\n")
-    if state.get("proposal"):
-        (directory / "role-preview.yaml").write_text(state["proposal"]["role_yaml"])
-        (directory / "binding-preview.json").write_text(json.dumps(state["proposal"]["unchanged_binding"], indent=2) + "\n")
+    payload.update(proposal=state.get("proposal"), receipt=state.get("receipt"), revision_request=state.get("revision_request"))
+    # Hash the arbitrary external run ID before using it as a directory name.
+    history = directory / "runs" / canonical_hash(state["request"]["run_id"]).split(":")[1][:24]
+    history.mkdir(parents=True, exist_ok=True)
+    for output in (directory, history):
+        (output / "result.json").write_text(json.dumps(payload, indent=2) + "\n")
+        if state.get("proposal"):
+            (output / "role-preview.yaml").write_text(state["proposal"]["role_yaml"])
+            (output / "binding-preview.json").write_text(json.dumps(state["proposal"]["unchanged_binding"], indent=2) + "\n")
+        else:
+            (output / "role-preview.yaml").unlink(missing_ok=True)
+            (output / "binding-preview.json").unlink(missing_ok=True)
+    if state.get("evidence"):
+        (history / "evidence.json").write_text(json.dumps(state["evidence"], indent=2) + "\n")
     return payload
 
 
@@ -66,6 +105,8 @@ def main(argv=None):
     start.add_argument("--threads", type=int, default=4)
     start.add_argument("--intent", choices=["analyze", "adopt_baseline"], default="analyze")
     sub.add_parser("status")
+    sub.add_parser("renew", help="request a fresh revision after unused review/approval expiry")
+    sub.add_parser("next", help="run the recorded successor revision; never carries old authority")
     decision = sub.add_parser("decide")
     decision.add_argument("kind", choices=["approve_remediation", "adopt_baseline", "reject", "acknowledge", "request_context"])
     resume = sub.add_parser("resume")
@@ -94,18 +135,14 @@ def main(argv=None):
                                   intent=args.intent,
                                   mode="preview" if args.evidence else "simulation")
         (directory / "evidence.json").write_text(evidence.model_dump_json(indent=2))
-        if args.model == "llama-cpp":
-            import os
-            from dotenv import load_dotenv
-            load_dotenv()
-            model_path = args.model_path or os.environ.get("MODEL_PATH")
-            if not model_path:
-                parser.error("llama-cpp needs --model-path or MODEL_PATH")
-            model = LlamaCppModelClient(model_path, timeout_seconds=args.timeout, threads=args.threads)
-        else:
-            model = ScriptedModelClient()
+        try:
+            model, model_config = configured_model({"provider": args.model, "model_path": args.model_path,
+                                                     "timeout": args.timeout, "threads": args.threads})
+        except ValueError as exc:
+            parser.error(str(exc))
         with open_runner(directory, model, evidence) as (graph, runtime, store):
-            (directory / "run.json").write_text(json.dumps({"run_id": request.run_id, "producer": model.producer}))
+            (directory / "run.json").write_text(json.dumps({"run_id": request.run_id, "producer": model.producer,
+                                                          "model_config": model_config}))
             state = graph.invoke({"request": request.model_dump(mode="json")}, config(request.run_id))
             export_result(directory, state, runtime)
             print(json.dumps({"run_id": request.run_id, "status": state["status"], "mode": request.mode,
@@ -116,8 +153,20 @@ def main(argv=None):
                 print(state["proposal"]["diff"])
         return
     run = json.loads((directory / "run.json").read_text())
-    with open_runner(directory) as (graph, runtime, store):
-        runtime.model.producer = run["producer"]
+    model = None
+    if args.command == "next":
+        model_config = run.get("model_config")
+        if model_config is None:
+            if run["producer"] != "scripted-test":
+                parser.error("saved_model_configuration_missing: cannot substitute scripted inference")
+            model_config = {"provider": "scripted"}
+        try:
+            model, model_config = configured_model(model_config)
+        except ValueError as exc:
+            parser.error(str(exc))
+    with open_runner(directory, model=model) as (graph, runtime, store):
+        if args.command != "next":
+            runtime.model.producer = run["producer"]
         state = graph.get_state(config(run["run_id"])).values
         try:
             require_compatible_state(state)
@@ -132,6 +181,24 @@ def main(argv=None):
             print(json.dumps({"run_id": run["run_id"], "status": state["status"], "reason": state.get("reason"),
                               "simulation": state["request"]["mode"] == "simulation", "model_calls": state["model_calls"],
                               "execution_requests": store.count("action"), "pending_proposal": state.get("proposal")}, indent=2))
+        elif args.command == "renew":
+            try:
+                ticket = renew_review(graph, runtime, config(run["run_id"]))
+            except (LookupError, ValueError) as exc:
+                parser.error(str(exc))
+            export_result(directory, graph.get_state(config(run["run_id"])).values, runtime)
+            print(json.dumps(ticket.model_dump(mode="json"), indent=2))
+        elif args.command == "next":
+            if not state.get("revision_request"):
+                parser.error("no successor revision is recorded")
+            ticket = store.get_revision(state["revision_request"]["revision_request_id"])
+            state = start_successor(graph, ticket)
+            (directory / "run.json").write_text(json.dumps({"run_id": ticket.request.run_id, "producer": runtime.model.producer,
+                                                          "model_config": model_config}))
+            export_result(directory, state, runtime)
+            print(json.dumps({"run_id": ticket.request.run_id, "revision": ticket.request.revision,
+                              "status": state["status"], "model_calls": state["model_calls"],
+                              "reuse_analysis": ticket.reuse_analysis, "execution_requests": store.count("action")}, indent=2))
         elif args.command == "decide":
             if state["status"] != "PENDING_REVIEW":
                 parser.error("run is not waiting for review")
@@ -145,7 +212,8 @@ def main(argv=None):
             state = graph.invoke(Command(resume=args.decision_id), config(run["run_id"]))
             export_result(directory, state, runtime)
             print(json.dumps({"status": state["status"], "reason": state.get("reason"),
-                              "receipt": state.get("receipt"), "execution_requests": store.count("action")}, indent=2))
+                              "receipt": state.get("receipt"), "revision_request": state.get("revision_request"),
+                              "execution_requests": store.count("action")}, indent=2))
 
 
 if __name__ == "__main__":

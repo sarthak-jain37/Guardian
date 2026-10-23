@@ -4,8 +4,8 @@ from typing import Literal
 
 from contracts.usage_summary_v1 import Contract, ID
 
-GRAPH_VERSION = "guardian.graph.v3"
-STATE_VERSION = "guardian.state.v3"
+GRAPH_VERSION = "guardian.graph.v4"
+STATE_VERSION = "guardian.state.v4"
 VALIDATOR_VERSION = "guardian.validator.v1"
 CANONICALIZATION_VERSION = "guardian.sorted-json-sha256.v1"
 
@@ -13,8 +13,8 @@ CANONICALIZATION_VERSION = "guardian.sorted-json-sha256.v1"
 class RunVersions(Contract):
     # Required even when they have only one supported value: a legacy checkpoint
     # must not silently acquire the current versions through model defaults.
-    graph_version: Literal["guardian.graph.v3"]
-    state_version: Literal["guardian.state.v3"]
+    graph_version: Literal["guardian.graph.v4"]
+    state_version: Literal["guardian.state.v4"]
     validator_version: Literal["guardian.validator.v1"]
     canonicalization_version: Literal["guardian.sorted-json-sha256.v1"]
     policy_version: ID

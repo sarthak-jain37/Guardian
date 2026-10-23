@@ -132,7 +132,7 @@ class EvidenceBundle(Contract):
 
 
 class AnalysisRequest(Contract):
-    schema_version: Literal["guardian.analysis-request.v3"] = "guardian.analysis-request.v3"
+    schema_version: Literal["guardian.analysis-request.v4"] = "guardian.analysis-request.v4"
     case_id: ID
     run_id: ID
     revision: int = Field(default=1, strict=True, ge=1)
@@ -144,6 +144,7 @@ class AnalysisRequest(Contract):
     policy_version: ID = "guardian.demo-policy.v1"
     mode: Literal["simulation", "preview"] = "simulation"
     intent: Literal["analyze", "adopt_baseline"] = "analyze"
+    revision_request_id: ID | None = None
 
 
 def validate_request_evidence(request: AnalysisRequest, evidence: EvidenceBundle) -> None:
@@ -316,8 +317,8 @@ class ApprovalDecision(Contract):
 
 
 class AnalysisReport(Contract):
-    schema_version: Literal["guardian.report.v3"] = "guardian.report.v3"
-    graph_version: Literal["guardian.graph.v3"]
+    schema_version: Literal["guardian.report.v4"] = "guardian.report.v4"
+    graph_version: Literal["guardian.graph.v4"]
     versions: RunVersions
     case_id: ID
     run_id: ID
@@ -336,6 +337,30 @@ class AnalysisReport(Contract):
     model_calls: int = Field(strict=True, ge=0, le=6)
     lookup_calls: int = Field(strict=True, ge=0, le=4)
     trace: list[dict[str, JsonValue]] = Field(max_length=128)
+
+
+class RevisionRequest(Contract):
+    schema_version: Literal["guardian.revision-request.v1"] = "guardian.revision-request.v1"
+    revision_request_id: ID
+    source_proposal_id: ID
+    source_run_id: ID
+    source_revision: int = Field(strict=True, ge=1)
+    source_approval_hash: ID
+    reason: Literal["revision_requested", "review_window_expired", "execution_window_expired"]
+    request: AnalysisRequest
+    evidence_hash: ID
+    reuse_analysis: bool = Field(strict=True)
+    created_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def lineage(self):
+        utc(self.created_at)
+        if (self.request.run_id == self.source_run_id or self.request.revision != self.source_revision + 1
+                or self.request.revision_request_id != self.revision_request_id):
+            raise ValueError("revision requires a new run, next revision and matching request ID")
+        if self.reason == "revision_requested" and self.reuse_analysis:
+            raise ValueError("context requests require fresh analysis")
+        return self
 
 
 def utc_now() -> datetime:

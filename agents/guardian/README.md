@@ -1,41 +1,46 @@
 # Guardian LangGraph module demo
 
-## Plan v4 foundation update
+## Plan v4 phases 1–2
 
 Phase 2 adds explicit snapshot adoption using `start --intent adopt_baseline`.
 It skips the model and can reach review without usage telemetry or a removal
 candidate. `decide adopt_baseline` authorizes only that exact adoption. The
 recording baseline adapter records a local test request with
 `baseline_activated=false`; it performs no Kubernetes write. Captured exports
-remain previews. Request/report schemas and graph/state versions are now v3;
+remain previews. Request/report schemas and graph/state versions are now v4;
 proposal/test-decision schemas are v2. See contract decision 0002.
 
-The next implementation is divided into contracts/compatibility, graph review
-routes, model/tool integration, backend governance adapters, then real-model/lab
-validation. Phase 1 implements the contract and checkpoint foundation. The
-personal phase plan remains in Git-ignored `personal_docs/langgraph-part2-phases.md`.
+Phase 1 supplies strict contracts and checkpoint compatibility. Phase 2 supplies
+adoption routing, durable context revision requests, expired-review renewal and
+report/readiness publication. Model/tool expansion, backend governance adapters
+and real-model/lab integration remain later phases. The personal phase plan stays
+in Git-ignored `personal_docs/langgraph-part2-phases.md`.
 
-Requests now use `guardian.analysis-request.v2` and bind the optional baseline and
+Requests use `guardian.analysis-request.v4` and bind the optional baseline and
 policy version as well as snapshot/cluster/target UID. Reports use
-`guardian.report.v2` with typed permission facts, readiness and runtime versions.
+`guardian.report.v4` with typed permission facts, readiness and runtime versions.
 The three lifecycle vocabularies are separate; defining their values does not
 implement backend lifecycle persistence. The graph independently validates exports
 from every evidence adapter before analysis.
 
-`schema` exports all ten boundary/model schemas from the runtime definitions.
+`schema` exports all eleven boundary/model schemas from the runtime definitions.
 See `contracts/compatibility.json` and
-`contracts/decisions/0001-orchestration-foundations.md` for producer/consumer review
+`contracts/decisions/0002-review-routes.md` for producer/consumer review
 status and wire versions. Shared component acceptance is pending. Production
 decision/verification/recovery/receipt integration belongs to subsequent phases;
 the exported test-decision contract remains simulation-only.
 
 Checkpoints require compatible graph/state/validator/canonicalization/policy
-versions. Earlier unstamped reviews can be inspected with `status`, which reports
+versions. Incompatible earlier reviews can be inspected with `status`, which reports
 `compatible=false`; `decide` and `resume` refuse them. Preserve old directories,
 reconcile any already-requested real backend action, and use a fresh reviewed
 revision. There is no automatic checkpoint migration or authority renewal.
 
-This implements the first orchestration slice of the v3 design. It demonstrates useful initial analysis without an approved baseline, separate investigator/planner stages, deterministic policy rendering, and a restartable review flow. It does not implement collector storage, backend authentication, the production decision ledger, a Kubernetes executor, baseline activation, recovery, or deployment.
+The module demonstrates useful initial analysis without an approved baseline,
+separate investigator/planner stages, deterministic rendering and restartable
+review. Collector storage, backend authentication, the production ledger,
+Kubernetes execution, real baseline activation, recovery and deployment remain
+integration work owned by their respective components.
 
 All built-in evidence is **synthetic fixture data**. Scripted model responses are explicitly labeled `scripted-test`. The optional llama.cpp adapter runs real inference over the same fixture, without hidden required/unnecessary labels. Every review/decision/execution record is a **local simulation**. The recording executor performs no cluster writes and cannot activate a baseline. Captured evidence accepts preview mode only; missing backend verification prevents execution review.
 
@@ -82,6 +87,46 @@ uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo
 
 On a separate case, use `decide approve_remediation` and resume its returned ID to demonstrate **one recording-fake request**. The receipt explicitly says `cluster_write_performed=false`, `verification_performed=false`, and `baseline_activated=false`. Duplicate delivery cannot create another recorded action. A resume boolean or forged decision ID cannot authorize even this simulated request.
 
+To demonstrate adoption independently of removal, start a separate case:
+
+```bash
+uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo-adoption start --intent adopt_baseline --scenario missing-usage
+uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo-adoption decide adopt_baseline
+uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo-adoption resume --decision-id RETURNED_ID
+```
+
+This uses zero model calls and records a simulated adoption request, with no
+cluster write or real baseline activation. The adoption proposal has no patch.
+
+On a pending review, `decide request_context` followed by `resume` records one
+successor revision and supersedes the old proposal. `next` starts that recorded
+run using fresh scoped context and fresh model analysis. The backend owner decides
+when an answer is ready and supplies the real queue/outbox; the demo command is
+explicit. Context can arrive after the intent is recorded. The loaded snapshot
+is bound before analysis and the old decision cannot approve the new proposal.
+
+```bash
+uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo-initial decide request_context
+uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo-initial resume --decision-id RETURNED_ID
+uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo-initial next
+```
+
+After an unused review or approval expires, `renew` records a new revision and
+closes the old worker checkpoint; `next` starts its review. It refuses still-valid
+authority, rejected/revoked decisions and actions already started. A harmless
+freshness/retained-use refresh can reuse validated analysis with zero model calls;
+new candidate use, changed context, lost citations, coverage changes or count
+corrections require reanalysis. Gates and verification run again either way and
+each revision needs a new decision. Expiry does not refresh frozen fixture history:
+stale sources remain blocked. Production expiry scheduling remains backend-owned.
+
+Follow-up analysis reconstructs the original configured provider. Missing real
+model configuration is an explicit error and never becomes scripted inference.
+`result.json` and preview files show the current run; `runs/<run-id-hash>/` preserves
+each run's evidence and result. The SQLite store preserves immutable published
+reports, decisions, revisions and append-only proposal transitions separately
+from the current status projection.
+
 Demonstrate blocked evidence:
 
 ```bash
@@ -127,8 +172,8 @@ Captured evidence produces a draft/blocked preview unless the later real governa
 - The review interrupt contains no side effects. SQLite checkpoints and separate local test records survive process restart.
 - Decisions bind revision, hashes, target, policy, kind and independent review/execution deadlines. Current evidence/readiness is checked again before recording a request.
 - Durable model-call reservations are committed before inference, so a crashed call consumes the budget. Lookup rounds/calls and one repair per stage are bounded; the longest supported route fits the recursion backstop.
-- Material evidence refreshes are conservatively rejected using an exact snapshot hash. Fine-grained non-material refresh handling is deferred.
-- `request_context` closes the old run as stale; the caller must start a fresh revision/run. Automatic renewal/revision scheduling and expired-review cleanup are backend integration work.
+- Approved execution still requires an exact snapshot hash. Renewal may reuse analysis after a narrowly checked non-material refresh, with fresh review and approval.
+- `request_context` closes the old run as stale and records a fresh revision. `renew` and `next` exercise the port contract locally; real scheduling and expiry delivery remain backend work.
 - Simulated approval ends at `EXECUTION_REQUESTED`, never a claimed verified `COMPLETED` deployment. No recovery authority is granted.
 
 See the personal scope document for the meeting sequence and teammate messages. It intentionally remains in Git-ignored personal documentation.

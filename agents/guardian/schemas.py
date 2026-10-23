@@ -3,20 +3,21 @@
 from contracts.usage_summary_v1 import UsageSummary
 
 from .contracts import (AnalysisReport, AnalysisRequest, ApprovalDecision, ChangePlan,
-                        EvidenceBundle, Investigation, Proposal, ReadinessAssessment)
+                        EvidenceBundle, Investigation, Proposal, ReadinessAssessment, RevisionRequest)
 from .versions import RunVersions
 
 SCHEMA_MODELS = {
     "usage": ("guardian.usage-summary.v1", UsageSummary),
     "evidence": ("guardian.evidence.v1", EvidenceBundle),
-    "request": ("guardian.analysis-request.v3", AnalysisRequest),
-    "report": ("guardian.report.v3", AnalysisReport),
+    "request": ("guardian.analysis-request.v4", AnalysisRequest),
+    "report": ("guardian.report.v4", AnalysisReport),
     "readiness": ("guardian.readiness.v1", ReadinessAssessment),
     "proposal": ("guardian.proposal.v2", Proposal),
     "test_decision": ("guardian.test-decision.v2", ApprovalDecision),
     "investigation": ("guardian.investigation.v1", Investigation),
     "plan": ("guardian.change-plan.v1", ChangePlan),
     "run_versions": ("guardian.run-versions.v1", RunVersions),
+    "revision_request": ("guardian.revision-request.v1", RevisionRequest),
 }
 
 

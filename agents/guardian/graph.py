@@ -13,6 +13,7 @@ from .policy import (build_facts, canonical_hash, global_gates, render, risk_fin
                      validate_investigation, validate_plan)
 from .ports import BaselinePort, BudgetPort, EvidencePort, ExecutionPort, ModelClient, ReviewPort, VerificationPort
 from .review import adoption_gates, adoption_proposal, checked_gates
+from .revisions import prepare_revision, read_evidence
 from .state import GuardianState
 from .versions import GRAPH_VERSION, current_versions, require_compatible_state
 
@@ -41,7 +42,7 @@ def report(state, runtime):
     return AnalysisReport.model_validate({"graph_version": GRAPH_VERSION, "versions": state["versions"],
             "case_id": state["request"]["case_id"], "run_id": state["request"]["run_id"],
             "mode": state["request"]["mode"],
-            "producer": "deterministic" if state["request"].get("intent") == "adopt_baseline" else runtime.model.producer,
+            "producer": "deterministic" if state["request"].get("intent") == "adopt_baseline" else state.get("analysis_producer", runtime.model.producer),
             "status": state.get("status"), "reason": state.get("reason"),
             "facts": state.get("facts", []), "security_risk": state.get("risk", []),
             "investigation": state.get("investigation"), "plan": state.get("plan"),
@@ -54,6 +55,7 @@ def build_graph(runtime: Runtime, checkpointer):
     def accept_case(state, config):
         if state.get("started_at") is not None:
             require_compatible_state(state)
+            raise ValueError("run_already_started: use a recorded successor revision")
         req = AnalysisRequest.model_validate(state["request"])
         if config.get("configurable", {}).get("thread_id") != req.run_id:
             raise ValueError("run_id must equal checkpoint thread_id")
@@ -62,26 +64,49 @@ def build_graph(runtime: Runtime, checkpointer):
                 "started_at": runtime.clock().isoformat(), "model_calls": 0, "lookup_rounds": 0,
                 "lookup_calls": 0, "investigator_repairs": 0, "planner_repairs": 0,
                 "model_status": "not_called", "investigation": None, "plan": None,
-                "proposal": None, "receipt": None, "readiness": None,
+                "proposal": None, "receipt": None, "readiness": None, "revision_request": None,
+                "analysis_producer": runtime.model.producer,
                 "trace": event(state, "accept_case", graph_version=GRAPH_VERSION)}
 
     def load_evidence(state):
         require_compatible_state(state)
         try:
             request = AnalysisRequest.model_validate(state["request"])
-            raw = runtime.evidence.load(request)
-            evidence = EvidenceBundle.model_validate(raw.model_dump(mode="json") if isinstance(raw, EvidenceBundle) else raw)
+            ticket = None
+            if request.revision_request_id:
+                ticket = runtime.review.get_revision(request.revision_request_id)
+                if ticket.request != request:
+                    raise ValueError("revision_request_does_not_match_intake")
+            context_revision = ticket is not None and ticket.reason == "revision_requested"
+            raw = runtime.evidence.current(request) if context_revision else runtime.evidence.load(request)
+            evidence = read_evidence(raw)
+            if context_revision:
+                # A context request is an analysis intent. Its answer can arrive
+                # after queueing; bind the actual snapshot before fresh analysis.
+                source = runtime.review.get_proposal(ticket.source_proposal_id)
+                if ((source.target.kind, source.target.namespace, source.target.name, source.target.uid) !=
+                        (evidence.target.kind, evidence.target.namespace, evidence.target.name, evidence.target.uid)):
+                    raise ValueError("revision_target_scope_changed")
+                request = request.model_copy(update={"snapshot_id": evidence.snapshot_id})
+            elif ticket is not None and ticket.evidence_hash != canonical_hash(evidence.model_dump(mode="json")):
+                raise ValueError("revision_request_does_not_match_current_evidence")
             validate_request_evidence(request, evidence)
         except (LookupError, ValueError, TypeError) as exc:
             return {"status": "BLOCKED", "reason": f"invalid_evidence: {str(exc)[:250]}",
                     "trace": event(state, "load_evidence", outcome="invalid_or_unavailable")}
-        return {"evidence": evidence.model_dump(mode="json"),
+        return {"request": request.model_dump(mode="json"), "evidence": evidence.model_dump(mode="json"),
                 "trace": event(state, "load_evidence", source_mode=evidence.source_mode,
                                baseline_present=evidence.baseline_id is not None)}
 
     def facts_node(state):
         facts, gates = build_facts(bundle(state), runtime.clock())
-        return {"facts": facts, "trace": event(state, "build_facts", gates=[g.model_dump() for g in gates])}
+        readiness = ReadinessAssessment(policy_version=bundle(state).policy.policy_version,
+                                        evidence_revision=bundle(state).revision, gates=gates,
+                                        allowed_removal_ids=[f["permission_id"] for f in facts if f["eligible"]],
+                                        protected_permission_ids=[f["permission_id"] for f in facts if f["protected"]],
+                                        residual_uncertainties=[], execution_ready=False)
+        return {"facts": facts, "readiness": readiness.model_dump(mode="json"),
+                "trace": event(state, "build_facts", gates=[g.model_dump() for g in gates])}
 
     def assess_risk(state):
         return {"risk": risk_findings(bundle(state)), "trace": event(state, "assess_risk")}
@@ -100,6 +125,32 @@ def build_graph(runtime: Runtime, checkpointer):
                 "status": "PENDING_REVIEW" if ready else "BLOCKED",
                 "reason": None if ready else "adoption_readiness_incomplete",
                 "trace": event(state, "prepare_adoption", review_ready=ready)}
+
+    def restore_analysis(state):
+        ticket = runtime.review.get_revision(state["request"]["revision_request_id"])
+        source = runtime.review.get_proposal(ticket.source_proposal_id)
+        previous = runtime.review.get_report(ticket.source_run_id)
+        if (source.approval_hash != ticket.source_approval_hash or source.case_id != state["request"]["case_id"]
+                or previous["versions"] != state["versions"]):
+            return {"status": "BLOCKED", "reason": "incompatible_revision_source", "trace": event(state, "restore_analysis", outcome="blocked")}
+        try:
+            investigation = Investigation.model_validate(previous["investigation"])
+            plan = ChangePlan.model_validate(previous["plan"])
+            validate_investigation(investigation, state["facts"], bundle(state))
+            validate_plan(plan, state["facts"], investigation, bundle(state))
+        except (ValueError, TypeError):
+            return {"trace": event(state, "restore_analysis", outcome="reanalyze")}
+        return {"investigation": investigation.model_dump(mode="json"), "plan": plan.model_dump(mode="json"),
+                "analysis_producer": previous["producer"], "model_status": "analysis_reused",
+                "trace": event(state, "restore_analysis", source_run_id=ticket.source_run_id, outcome="reused")}
+
+    def after_risk(state):
+        if state["request"]["intent"] == "adopt_baseline":
+            return "prepare_adoption"
+        ticket_id = state["request"].get("revision_request_id")
+        if ticket_id and runtime.review.get_revision(ticket_id).reuse_analysis:
+            return "restore_analysis"
+        return "investigate_context"
 
     def model_stage(state, stage):
         e = bundle(state)
@@ -243,6 +294,7 @@ def build_graph(runtime: Runtime, checkpointer):
                 "trace": event(state, "render_and_validate", execution_ready=ready, simulation=simulation)}
 
     def publish_review(state):
+        runtime.review.publish_report(state["request"]["run_id"], report(state, runtime))
         p = runtime.review.publish(Proposal.model_validate(state["proposal"]), report(state, runtime))
         return {"proposal": p.model_dump(mode="json"), "trace": event(state, "publish_review", proposal_id=p.proposal_id)}
 
@@ -262,6 +314,11 @@ def build_graph(runtime: Runtime, checkpointer):
             proposal = runtime.review.get_proposal(state["proposal"]["proposal_id"])
             decision: ApprovalDecision = runtime.review.get_decision(state["decision_id"])
             now = runtime.clock()
+            proposal_status = runtime.review.get_proposal_status(proposal.proposal_id)
+            recovering_context = (proposal_status == "SUPERSEDED" and decision.kind == "request_context"
+                                  and runtime.review.get_successor(proposal.proposal_id) is not None)
+            if proposal_status not in ("PENDING_APPROVAL", "APPROVED") and not recovering_context:
+                raise ValueError("proposal_no_longer_reviewable")
             if (decision.proposal_id != proposal.proposal_id or decision.revision != proposal.revision
                     or decision.approval_hash != proposal.approval_hash or decision.target_uid != proposal.target.uid
                     or decision.policy_version != proposal.policy_version or decision.revoked
@@ -271,7 +328,9 @@ def build_graph(runtime: Runtime, checkpointer):
                 raise ValueError("invalid_or_revoked_decision")
             if decision.kind in ("reject", "acknowledge", "request_context"):
                 status = {"reject": "REJECTED", "acknowledge": "NO_CHANGE", "request_context": "STALE"}[decision.kind]
+                ticket = prepare_revision(state, runtime, "revision_requested") if decision.kind == "request_context" else None
                 return {"status": status, "reason": "revision_requested" if decision.kind == "request_context" else decision.kind,
+                        "revision_request": ticket.model_dump(mode="json") if ticket else None,
                         "trace": event(state, "revalidate", decision_kind=decision.kind)}
             if decision.execution_expires_at is None or now >= decision.execution_expires_at:
                 raise ValueError("execution_window_expired")
@@ -279,7 +338,7 @@ def build_graph(runtime: Runtime, checkpointer):
             if decision.kind != expected_kind:
                 raise ValueError("decision_kind_does_not_match_proposal")
             req = AnalysisRequest.model_validate(state["request"])
-            current = runtime.evidence.current(req)
+            current = read_evidence(runtime.evidence.current(req))
             if canonical_hash(current.model_dump(mode="json")) != proposal.evidence_hash:
                 raise ValueError("material_evidence_changed")
             if proposal.action == "adopt_baseline":
@@ -324,10 +383,21 @@ def build_graph(runtime: Runtime, checkpointer):
 
     def finalize(state):
         require_compatible_state(state)
+        updates = {}
+        if state.get("readiness") and state["status"] != "PENDING_REVIEW":
+            updates["readiness"] = {**state["readiness"], "execution_ready": False}
         if state.get("proposal"):
             runtime.review.publish(Proposal.model_validate(state["proposal"]), report(state, runtime))
-        runtime.review.finalize_run(state["request"]["run_id"], report(state, runtime))
-        return {"trace": event(state, "finalize", status=state["status"])}
+            status = {"REJECTED": "REJECTED", "EXECUTION_REQUESTED": "APPROVED", "BLOCKED": "BLOCKED"}.get(state["status"])
+            if state["status"] == "STALE":
+                status = "EXPIRED" if state.get("reason") == "execution_window_expired" else "SUPERSEDED"
+            if status:
+                projection = runtime.review.project_proposal(state["proposal"]["proposal_id"], status, state.get("reason"))
+                updates["proposal"] = {**state["proposal"], "status": projection["status"]}
+        result = report({**state, **updates}, runtime)
+        runtime.review.publish_report(state["request"]["run_id"], result)
+        runtime.review.finalize_run(state["request"]["run_id"], result)
+        return {**updates, "trace": event(state, "finalize", status=state["status"])}
 
     graph = StateGraph(GuardianState)
 
@@ -340,6 +410,7 @@ def build_graph(runtime: Runtime, checkpointer):
     for name, function in [("accept_case", accept_case), ("load_evidence", load_evidence),
                            ("build_facts", facts_node), ("assess_risk", assess_risk),
                            ("prepare_adoption", prepare_adoption),
+                           ("restore_analysis", restore_analysis),
                            ("investigate_context", investigate_context), ("fetch_context", fetch_context),
                            ("select_strategy", select_strategy), ("plan_change", plan_change),
                            ("render_and_validate", render_and_validate), ("publish_review", publish_review),
@@ -353,8 +424,10 @@ def build_graph(runtime: Runtime, checkpointer):
     graph.add_conditional_edges("load_evidence", lambda s: "finalize" if s["status"] == "BLOCKED" else "build_facts",
                                 ["finalize", "build_facts"])
     graph.add_edge("build_facts", "assess_risk")
-    graph.add_conditional_edges("assess_risk", lambda s: "prepare_adoption" if s["request"]["intent"] == "adopt_baseline" else "investigate_context",
-                                ["prepare_adoption", "investigate_context"])
+    graph.add_conditional_edges("assess_risk", after_risk, ["prepare_adoption", "restore_analysis", "investigate_context"])
+    graph.add_conditional_edges("restore_analysis", lambda s: "finalize" if s["status"] == "BLOCKED" else
+                                "render_and_validate" if s.get("plan") is not None else "investigate_context",
+                                ["finalize", "render_and_validate", "investigate_context"])
     graph.add_conditional_edges("prepare_adoption", lambda s: "publish_review" if s["status"] == "PENDING_REVIEW" else "finalize",
                                 ["publish_review", "finalize"])
     graph.add_conditional_edges("investigate_context", investigation_route,

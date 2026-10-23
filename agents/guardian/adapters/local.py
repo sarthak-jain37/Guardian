@@ -5,8 +5,9 @@ import sqlite3
 from datetime import timedelta
 from pathlib import Path
 
-from ..contracts import AnalysisRequest, ApprovalDecision, EvidenceBundle, Proposal, utc_now
+from ..contracts import AnalysisRequest, ApprovalDecision, EvidenceBundle, Proposal, RevisionRequest, utc_now
 from ..policy import canonical_hash
+from ..lifecycle import ProposalStatus
 
 
 class LocalTestStore:
@@ -52,6 +53,89 @@ class LocalTestStore:
     def finalize_run(self, run_id: str, result: dict):
         return self.put_once("outcome", run_id, result)
 
+    def publish_report(self, run_id, report):
+        return self.put_once("analysis", run_id, report)
+
+    def get_report(self, run_id):
+        return self.get("analysis", run_id)
+
+    def get_proposal_status(self, proposal_id):
+        try:
+            return self.get("proposal_status", proposal_id)["status"]
+        except LookupError:
+            return self.get_proposal(proposal_id).status
+
+    def project_proposal(self, proposal_id, status, reason):
+        status = ProposalStatus(status).value
+        projection = {"proposal_id": proposal_id, "status": status, "reason": reason}
+        with self.connection:
+            current = self.connection.execute("SELECT payload FROM records WHERE kind='proposal_status' AND id=?", (proposal_id,)).fetchone()
+            if current and json.loads(current[0])["status"] in ("EXPIRED", "SUPERSEDED", "REJECTED", "BLOCKED"):
+                return json.loads(current[0])
+            self.connection.execute("INSERT OR IGNORE INTO records VALUES (?,?,?)",
+                                    ("proposal_transition", canonical_hash(projection), json.dumps(projection)))
+            self.connection.execute("INSERT OR REPLACE INTO records VALUES (?,?,?)",
+                                    ("proposal_status", proposal_id, json.dumps(projection)))
+        return projection
+
+    def get_proposal_decision(self, proposal_id):
+        try:
+            return self.get_decision(f"test-decision-{proposal_id}")
+        except LookupError:
+            return None
+
+    def get_revision(self, revision_request_id):
+        return RevisionRequest.model_validate(self.get("revision", revision_request_id))
+
+    def get_successor(self, proposal_id):
+        try:
+            successor = self.get("successor", proposal_id)
+        except LookupError:
+            return None
+        return self.get_revision(successor["revision_request_id"])
+
+    def request_revision(self, request):
+        p = self.get_proposal(request.source_proposal_id)
+        if (request.source_run_id != p.run_id or request.source_revision != p.revision
+                or request.source_approval_hash != p.approval_hash or request.request.case_id != p.case_id
+                or request.request.mode != ("simulation" if p.simulation else "preview")):
+            raise ValueError("revision_source_mismatch")
+        # This adapter is a test ledger only. Its atomic successor/projection
+        # records exercise the port contract the backend owner will implement.
+        with self.connection:
+            self.connection.execute("BEGIN IMMEDIATE")
+            existing = self.connection.execute("SELECT payload FROM records WHERE kind='successor' AND id=?", (p.proposal_id,)).fetchone()
+            if existing:
+                previous = self.get_revision(json.loads(existing[0])["revision_request_id"])
+                if previous.reason != request.reason:
+                    raise ValueError("revision_already_requested")
+                return previous
+            d = self.get_proposal_decision(p.proposal_id)
+            if request.reason == "revision_requested":
+                if d is None or d.kind != "request_context" or d.revoked:
+                    raise ValueError("context_revision_requires_stored_decision")
+            elif request.reason == "review_window_expired":
+                if d is not None or self.clock() < p.review_expires_at:
+                    raise ValueError("review_not_expired_or_decided")
+            else:
+                if (d is None or d.revoked or d.kind not in ("approve_remediation", "adopt_baseline")
+                        or d.execution_expires_at is None or self.clock() < d.execution_expires_at):
+                    raise ValueError("unused_approval_not_expired")
+            if any(json.loads(row[0]).get("proposal_id") == p.proposal_id
+                   for row in self.connection.execute("SELECT payload FROM records WHERE kind IN ('action','adoption')")):
+                raise ValueError("action_already_started")
+            projection = {"proposal_id": p.proposal_id,
+                          "status": "SUPERSEDED" if request.reason == "revision_requested" else "EXPIRED",
+                          "reason": request.reason}
+            for kind, identifier, payload in [
+                ("revision", request.revision_request_id, request.model_dump(mode="json")),
+                ("successor", p.proposal_id, {"revision_request_id": request.revision_request_id}),
+                ("proposal_transition", canonical_hash(projection), projection)]:
+                self.connection.execute("INSERT INTO records VALUES (?,?,?)", (kind, identifier, json.dumps(payload)))
+            self.connection.execute("INSERT OR REPLACE INTO records VALUES (?,?,?)",
+                                    ("proposal_status", p.proposal_id, json.dumps(projection)))
+        return request
+
     def publish(self, proposal: Proposal, report: dict) -> Proposal:
         stored = self.put_once("proposal", proposal.proposal_id, proposal.model_dump(mode="json"))
         # Publication retries may have a different clock; content identity must still agree.
@@ -68,7 +152,7 @@ class LocalTestStore:
 
     def record_test_decision(self, proposal_id: str, kind: str) -> ApprovalDecision:
         proposal = self.get_proposal(proposal_id)
-        if not proposal.simulation or proposal.status != "PENDING_APPROVAL":
+        if not proposal.simulation or self.get_proposal_status(proposal_id) != "PENDING_APPROVAL":
             raise ValueError("local test decisions require a ready simulated proposal")
         now = self.clock()
         if now >= proposal.review_expires_at:
@@ -103,7 +187,9 @@ class FixtureEvidencePort:
         return self.evidence.model_copy(deep=True)
 
     def current(self, request: AnalysisRequest) -> EvidenceBundle:
-        return self.load(request)
+        # Current refresh may have a new snapshot ID/version. The immutable load
+        # path stays exact; the graph decides whether refreshed facts are stale.
+        return self.evidence.model_copy(deep=True)
 
     def fetch_context(self, request, lookup) -> EvidenceBundle:
         if lookup.subject_id != self.evidence.subject.username or lookup.tool != "get_workload_context":
@@ -144,11 +230,14 @@ class RecordingExecutor:
         proposal = self.store.get_proposal(proposal_id)
         decision = self.store.get_decision(decision_id)
         now = self.store.clock()
-        if (proposal.action != "remediate" or not proposal.simulation or not decision.simulation or decision.revoked
+        if (self.store.get_proposal_status(proposal_id) not in ("PENDING_APPROVAL", "APPROVED")
+                or proposal.action != "remediate" or not proposal.simulation or not decision.simulation or decision.revoked
                 or decision.kind != "approve_remediation" or decision.proposal_id != proposal_id
                 or decision.approval_hash != proposal.approval_hash
                 or decision.revision != proposal.revision or decision.target_uid != proposal.target.uid
                 or decision.policy_version != proposal.policy_version
+                or decision.approved_at < proposal.published_at or decision.approved_at >= proposal.review_expires_at
+                or decision.approved_at > now
                 or decision.execution_expires_at is None or now >= decision.execution_expires_at):
             raise ValueError("invalid_test_authority")
         expected_key = canonical_hash([proposal_id, decision_id, proposal.approval_hash])
@@ -171,7 +260,8 @@ class RecordingBaselinePort:
         p = self.store.get_proposal(proposal_id)
         d = self.store.get_decision(decision_id)
         now = self.store.clock()
-        if (p.action != "adopt_baseline" or not p.simulation or not d.simulation
+        if (self.store.get_proposal_status(proposal_id) not in ("PENDING_APPROVAL", "APPROVED")
+                or p.action != "adopt_baseline" or not p.simulation or not d.simulation
                 or d.kind != "adopt_baseline" or d.revoked or d.proposal_id != p.proposal_id
                 or d.revision != p.revision or d.approval_hash != p.approval_hash
                 or d.target_uid != p.target.uid or d.policy_version != p.policy_version
