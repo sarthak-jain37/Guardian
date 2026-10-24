@@ -1,0 +1,8 @@
+[
+  {
+    "namespace": "client-app",
+    "allow_external": false,
+    "allowed_destination_namespaces": ["client-app", "kube-system"],
+    "allowed_binaries": ["/app/server"]
+  }
+]
