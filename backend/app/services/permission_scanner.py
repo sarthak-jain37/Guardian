@@ -138,6 +138,11 @@ def scan_dangerous_permissions(rbac_state: dict[str, Any]) -> list[dict[str, Any
                 else:
                     rule_severity = _max_severity(rule_severity, "HIGH")
 
+            if set(verbs) & {"create", "delete", "deletecollection", "patch", "update", "*"} and set(resources) & {"pods", "pods/exec", "pods/attach", "pods/ephemeralcontainers", "deployments", "daemonsets", "statefulsets", "jobs", "cronjobs", "replicasets"}:
+                rule_flags.append("WORKLOAD_CONTROL_PERMISSION")
+                rule_finding_texts.append("Allows workload mutation or interaction; examine binding scope and observed API activity")
+                rule_severity = _max_severity(rule_severity, "HIGH")
+
             if has_wildcard_api_groups:
                 rule_flags.append("WILDCARD_API_GROUPS")
                 rule_finding_texts.append("Wildcard apiGroups '*' allows targeting all API groups")

@@ -45,31 +45,31 @@ class KubernetesService:
 
         process(
             self.rbac_api
-            .list_role_for_all_namespaces()
+            .list_role_for_all_namespaces(_request_timeout=30)
             .items
         )
 
         process(
             self.rbac_api
-            .list_cluster_role()
+            .list_cluster_role(_request_timeout=30)
             .items
         )
 
         process(
             self.rbac_api
-            .list_role_binding_for_all_namespaces()
+            .list_role_binding_for_all_namespaces(_request_timeout=30)
             .items
         )
 
         process(
             self.rbac_api
-            .list_cluster_role_binding()
+            .list_cluster_role_binding(_request_timeout=30)
             .items
         )
 
         process(
             self.core_api
-            .list_service_account_for_all_namespaces()
+            .list_service_account_for_all_namespaces(_request_timeout=30)
             .items
         )
 
