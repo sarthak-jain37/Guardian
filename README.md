@@ -355,3 +355,8 @@ redis-cli del rbac:drift:events
 (Or redis-cli flushall to wipe everything and restart the backend).
 
 
+
+
+## Pod network and runtime monitoring
+
+See [Cilium/Hubble and Tetragon setup](docs/telemetry.md) for eBPF collection, stored HTTP/network/runtime events, pod connection graphs, boundary checks and local LLM evaluation.

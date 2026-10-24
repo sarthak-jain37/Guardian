@@ -1,0 +1,12 @@
+# Bind to Guardian's dedicated ServiceAccount, not monitored application accounts.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: guardian-evidence-reader
+rules:
+  - apiGroups: [""]
+    resources: [pods, serviceaccounts]
+    verbs: [get, list]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, clusterroles, rolebindings, clusterrolebindings]
+    verbs: [get, list]

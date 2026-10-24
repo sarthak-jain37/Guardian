@@ -186,3 +186,55 @@ else:
         st.markdown(
             current_event.get("llm_response", "No LLM analysis available.")
         )
+st.divider()
+st.header("Pod activity and runtime monitoring")
+try:
+    telemetry_status = requests.get(f"{BACKEND_URL}/telemetry/status", timeout=5)
+    telemetry_status.raise_for_status()
+    st.json(telemetry_status.json())
+    selected_namespace = st.text_input("Telemetry namespace (empty for all)")
+    params = {"limit": 500}
+    if selected_namespace:
+        params["namespace"] = selected_namespace
+    graph_response = requests.get(f"{BACKEND_URL}/telemetry/graph", params=params, timeout=10)
+    graph_response.raise_for_status()
+    graph = graph_response.json()
+    import json
+    dot = ["digraph pods {"]
+    for node in graph["nodes"]:
+        dot.append(f'{json.dumps(node["id"])} [label={json.dumps(node.get("namespace", "") + "/" + (node.get("pod") or node.get("ip", "unknown")))}];')
+    for edge in graph["edges"]:
+        label = f'{edge["flow_records"]} flows / {edge["http_requests"]} HTTP / {edge["drops"]} drops'
+        dot.append(f'{json.dumps(edge["source"])} -> {json.dumps(edge["target"])} [label={json.dumps(label)}];')
+    st.graphviz_chart("\n".join(dot + ["}"]))
+    records_response = requests.get(f"{BACKEND_URL}/telemetry/events", params=params, timeout=10)
+    records_response.raise_for_status()
+    records = records_response.json()["events"]
+    st.caption("Recent observed events; collection gaps and encrypted traffic limit coverage.")
+    st.dataframe(records, use_container_width=True)
+    if st.button("Evaluate recent activity with local LLM"):
+        with st.spinner("Evaluating activity against configured boundaries..."):
+            evaluation = requests.post(f"{BACKEND_URL}/telemetry/evaluate", params={**params, "limit": 50}, timeout=180)
+            evaluation.raise_for_status()
+            st.write(evaluation.json()["analysis"])
+except requests.RequestException as error:
+    st.warning(f"Telemetry backend unavailable: {error}")
+
+st.subheader("Pod evidence and permissions")
+try:
+    inventory_response = requests.get(f"{BACKEND_URL}/telemetry/pods", timeout=10)
+    inventory_response.raise_for_status()
+    inventory = inventory_response.json()
+    identities = {(p["namespace"], p["pod"]): p for p in inventory.get("pods", [])}
+    st.caption(f'Inventory observed at: {inventory.get("observed_at") or "not collected"}')
+    if identities:
+        selected = st.selectbox("Inspect a pod", list(identities), format_func=lambda p: "/".join(p))
+        with st.expander("Pod configuration and service-account grants"):
+            st.json(identities[selected])
+        evidence_response = requests.get(f"{BACKEND_URL}/telemetry/pods/{selected[0]}/{selected[1]}/evidence", timeout=15)
+        evidence_response.raise_for_status()
+        st.json(evidence_response.json())
+    else:
+        st.info("No pod inventory available. Check inventory collector status and read permissions.")
+except requests.RequestException as error:
+    st.warning(f"Pod evidence unavailable: {error}")

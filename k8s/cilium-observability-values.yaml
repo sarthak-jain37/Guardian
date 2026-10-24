@@ -1,0 +1,21 @@
+# Merge with the customer's existing, version-pinned Cilium values.
+hubble:
+  enabled: true
+  relay:
+    enabled: true
+  export:
+    static:
+      enabled: true
+      filePath: /var/run/cilium/hubble/events.log
+      fileMaxSizeMb: 100
+      fileMaxBackups: 5
+      fieldMask:
+        - time
+        - source
+        - destination
+        - IP
+        - l4
+        - l7
+        - verdict
+        - drop_reason_desc
+        - traffic_direction
