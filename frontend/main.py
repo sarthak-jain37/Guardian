@@ -148,9 +148,14 @@ def overview():
     events=api('/telemetry/events',ns_params(limit=1000))['events']
     visible=[p for p in all_pods if not namespace or p['namespace']==namespace]
     flagged=[e for e in events if e.get('findings')]
+    counts=api('/telemetry/counts',ns_params())
+    kinds=counts.get('by_kind',{})
     a,b,c,d=st.columns(4)
-    a.metric('Pods',len(visible));b.metric('Network flows',sum(e['kind']=='network' for e in events));c.metric('API actions',sum(e['kind']=='kubernetes_audit' for e in events));d.metric('Flagged events',len(flagged))
-    st.caption('Activity counts describe the latest 1,000 retained records in the selected namespace. They are not risk scores.')
+    a.metric('Pods',len(visible));b.metric('Network flows',kinds.get('network',0));c.metric('API actions',kinds.get('kubernetes_audit',0));d.metric('Flagged events',counts.get('flagged_events',0))
+    st.caption('Counters cover all retained observations in '+(namespace or 'all namespaces')+'. Recent activity and attention lists sample the latest 1,000 records. Counts are observations, not unique connections or risk scores.')
+    st.caption('Retention is bounded by '+str(counts.get('max_events',0))+ ' events across the cluster and '+str(counts.get('retention_seconds',0)//86400)+' days, whichever limit is reached first.')
+    if not kinds.get('network',0):
+        st.info('No retained network observations match this namespace. Choose All namespaces to inspect other workloads, or generate application traffic and click Refresh data. Zero observations do not establish that no communication occurred.')
     left,right=st.columns([1.5,1])
     with left:
         st.subheader('Workloads to inspect')

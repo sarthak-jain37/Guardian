@@ -21,6 +21,17 @@ async def events(request: Request, limit: int = Query(100, ge=1, le=5000), names
     return {"count": len(records), "events": records}
 
 
+@router.get('/counts')
+async def counts(request: Request, namespace: str | None = None):
+    from collections import Counter
+    service = request.app.state.telemetry
+    records = await service.events(service.maximum, namespace)
+    return {'namespace': namespace, 'retained_events': len(records),
+            'by_kind': dict(Counter(event['kind'] for event in records)),
+            'flagged_events': sum(bool(event.get('findings')) for event in records),
+            'max_events': service.maximum, 'retention_seconds': service.ttl}
+
+
 @router.get("/graph")
 async def graph(request: Request, limit: int = Query(1000, ge=1, le=5000), namespace: str | None = None):
     return await request.app.state.telemetry.graph(limit, namespace)

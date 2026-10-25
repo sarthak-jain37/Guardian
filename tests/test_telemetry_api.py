@@ -52,3 +52,18 @@ class TelemetryAPITests(unittest.TestCase):
     def test_pod_review_input_limits(self):
         self.assertEqual(self.client.post('/telemetry/pods/app/web/review',json={'event_limit':0}).status_code,422)
         self.assertEqual(self.client.post('/telemetry/pods/app/web/review',json={'question':'x'*2001}).status_code,422)
+
+    def test_counts_include_flows_beyond_recent_activity_sample(self):
+        import json
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        process = {'kind': 'process_exec', 'observed_at': now, 'source_pod': {'namespace': 'app'}}
+        network = {'kind': 'network', 'observed_at': now, 'source_pod': {'namespace': 'app'}}
+        other = {'kind': 'network', 'observed_at': now, 'source_pod': {'namespace': 'other'}}
+        self.service.redis.lrange.return_value = [json.dumps(process)] * 1001 + [json.dumps(network), json.dumps(other)]
+        recent = self.client.get('/telemetry/events?namespace=app&limit=1000').json()['events']
+        self.assertFalse(any(e['kind'] == 'network' for e in recent))
+        counts = self.client.get('/telemetry/counts?namespace=app').json()
+        self.assertEqual(counts['by_kind']['network'], 1)
+        self.assertEqual(counts['retained_events'], 1002)
+        self.assertEqual(self.client.get('/telemetry/counts').json()['by_kind']['network'], 2)
