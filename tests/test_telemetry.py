@@ -67,5 +67,18 @@ class TelemetryTests(unittest.IsolatedAsyncioTestCase):
             service.save.assert_awaited_once()
 
 
+    async def test_graph_keeps_newest_observed_ip(self):
+        redis = AsyncMock()
+        latest = flow()
+        latest['flow']['IP'] = {'source': '10.0.0.2', 'destination': '10.0.0.3'}
+        previous = flow()
+        previous['flow']['IP'] = {'source': '10.0.0.1', 'destination': '10.0.0.3'}
+        redis.lrange.return_value = [json.dumps(normalize(latest, 'hubble', 'c1')), json.dumps(normalize(previous, 'hubble', 'c1'))]
+        service = Telemetry(redis)
+        graph = await service.graph()
+        source = next(n for n in graph['nodes'] if n['pod'] == 'web')
+        self.assertEqual(source['ip'], '10.0.0.2')
+
+
 if __name__ == "__main__":
     unittest.main()

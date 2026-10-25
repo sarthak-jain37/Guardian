@@ -132,7 +132,7 @@ class Telemetry:
             for side in ("source_pod", "destination_pod"):
                 ep = event[side]
                 identity = f"{self.cluster}/{ep['namespace']}/{ep['pod']}" if ep["pod"] else f"{self.cluster}/ip/{ep.get('ip') or 'unknown'}"
-                nodes[identity] = {"id": identity, **ep}
+                nodes.setdefault(identity, {"id": identity, **ep, "last_seen": event.get("timestamp") or event["observed_at"]})
                 ids.append(identity)
             key = tuple(ids)
             edge = edges.setdefault(key, {"source": ids[0], "target": ids[1], "flow_records": 0, "http_requests": 0, "drops": 0})

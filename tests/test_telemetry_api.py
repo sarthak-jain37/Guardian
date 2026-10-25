@@ -44,3 +44,11 @@ class TelemetryAPITests(unittest.TestCase):
         response = self.client.get('/telemetry/llm-context?namespace=app&pod=web')
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.json()['pod_evidence']['scoring_enabled'])
+
+    def test_missing_pod_review_returns_not_found(self):
+        response=self.client.get('/telemetry/pods/app/missing/review-context')
+        self.assertEqual(response.status_code,404)
+
+    def test_pod_review_input_limits(self):
+        self.assertEqual(self.client.post('/telemetry/pods/app/web/review',json={'event_limit':0}).status_code,422)
+        self.assertEqual(self.client.post('/telemetry/pods/app/web/review',json={'question':'x'*2001}).status_code,422)
