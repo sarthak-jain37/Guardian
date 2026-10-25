@@ -9,6 +9,7 @@ from contracts.usage_summary_v1 import Contract, ID, Subject, UsageSummary, utc
 
 from .lifecycle import ProposalStatus, RunStatus
 from .versions import RunVersions
+from .governance import ExecutionReceipt
 
 Text = Annotated[str, Field(min_length=1, max_length=4000)]
 
@@ -132,7 +133,7 @@ class EvidenceBundle(Contract):
 
 
 class AnalysisRequest(Contract):
-    schema_version: Literal["guardian.analysis-request.v4"] = "guardian.analysis-request.v4"
+    schema_version: Literal["guardian.analysis-request.v5"] = "guardian.analysis-request.v5"
     case_id: ID
     run_id: ID
     revision: int = Field(default=1, strict=True, ge=1)
@@ -142,7 +143,7 @@ class AnalysisRequest(Contract):
     target_uid: ID
     baseline_id: ID | None = None
     policy_version: ID = "guardian.demo-policy.v1"
-    mode: Literal["simulation", "preview"] = "simulation"
+    mode: Literal["simulation", "preview", "governed"] = "simulation"
     intent: Literal["analyze", "adopt_baseline"] = "analyze"
     revision_request_id: ID | None = None
 
@@ -157,6 +158,8 @@ def validate_request_evidence(request: AnalysisRequest, evidence: EvidenceBundle
         raise ValueError("request_evidence_mismatch: snapshot, scope, baseline or policy differs")
     if request.mode == "simulation" and evidence.source_mode != "fixture":
         raise ValueError("captured evidence cannot enter simulation review")
+    if request.mode == "governed" and evidence.source_mode != "captured":
+        raise ValueError("governed analysis requires captured producer evidence")
 
 
 EvidenceToolName = Literal["get_case_snapshot", "get_workload_context", "get_usage_summary", "get_binding_consumers", "get_failure_history", "check_access"]
@@ -325,12 +328,12 @@ class ApprovalDecision(Contract):
 
 
 class AnalysisReport(Contract):
-    schema_version: Literal["guardian.report.v6"] = "guardian.report.v6"
-    graph_version: Literal["guardian.graph.v6"]
+    schema_version: Literal["guardian.report.v7"] = "guardian.report.v7"
+    graph_version: Literal["guardian.graph.v7"]
     versions: RunVersions
     case_id: ID
     run_id: ID
-    mode: Literal["simulation", "preview"]
+    mode: Literal["simulation", "preview", "governed"]
     producer: ID
     status: RunStatus
     reason: Text | None
@@ -345,6 +348,7 @@ class AnalysisReport(Contract):
     model_calls: int = Field(strict=True, ge=0, le=6)
     lookup_calls: int = Field(strict=True, ge=0, le=4)
     trace: list[dict[str, JsonValue]] = Field(max_length=128)
+    execution_outcome: ExecutionReceipt | None = None
 
 
 class RevisionRequest(Contract):

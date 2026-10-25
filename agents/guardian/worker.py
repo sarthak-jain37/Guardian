@@ -14,6 +14,7 @@ from .modeling import load_profile
 from .runner import config, configured_model, export_result, open_runner, start_successor
 from .versions import require_compatible_state
 from .work import WorkItem, WorkOutcome
+from .reconciliation import reconcile_run
 
 
 class WorkQueuePort(Protocol):
@@ -55,7 +56,9 @@ def process_work(graph, runtime, item):
     item = WorkItem.model_validate(item.model_dump(mode="json") if isinstance(item, WorkItem) else item)
     cfg = config(item.run_id)
     snapshot = graph.get_state(cfg)
-    if item.kind == "revision":
+    if item.kind == "reconcile":
+        state = reconcile_run(graph, runtime, cfg)
+    elif item.kind == "revision":
         ticket = runtime.review.get_revision(item.revision_request_id)
         if ticket.request.run_id != item.run_id:
             raise ValueError("revision_delivery_scope_mismatch")

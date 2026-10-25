@@ -8,12 +8,13 @@ from .versions import RunVersions
 from .modeling import ModelConfig, ModelResult
 from .evidence_tools import ToolResult
 from .work import WorkItem, WorkOutcome
+from .governance import GovernedDecision, PreflightResult, ExecutionReceipt
 
 SCHEMA_MODELS = {
     "usage": ("guardian.usage-summary.v1", UsageSummary),
     "evidence": ("guardian.evidence.v1", EvidenceBundle),
-    "request": ("guardian.analysis-request.v4", AnalysisRequest),
-    "report": ("guardian.report.v6", AnalysisReport),
+    "request": ("guardian.analysis-request.v5", AnalysisRequest),
+    "report": ("guardian.report.v7", AnalysisReport),
     "readiness": ("guardian.readiness.v1", ReadinessAssessment),
     "proposal": ("guardian.proposal.v2", Proposal),
     "test_decision": ("guardian.test-decision.v2", ApprovalDecision),
@@ -25,8 +26,11 @@ SCHEMA_MODELS = {
     "model_result": ("guardian.model-result.v1", ModelResult),
     "evidence_tool_request": ("guardian.evidence-tool-request.v1", ContextLookup),
     "evidence_tool_result": ("guardian.evidence-tool-result.v1", ToolResult),
-    "work_item": ("guardian.work-item.v1", WorkItem),
-    "work_outcome": ("guardian.work-outcome.v1", WorkOutcome),
+    "work_item": ("guardian.work-item.v2", WorkItem),
+    "work_outcome": ("guardian.work-outcome.v2", WorkOutcome),
+    "governed_decision": ("guardian.governed-decision.v1", GovernedDecision),
+    "preflight": ("guardian.preflight.v1", PreflightResult),
+    "execution_receipt": ("guardian.execution-receipt.v1", ExecutionReceipt),
 }
 
 

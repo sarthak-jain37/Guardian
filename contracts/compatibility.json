@@ -1,14 +1,14 @@
 {
   "schema_version": "guardian.contract-compatibility.v1",
-  "release": "guardian.model-tools-worker.v1",
+  "release": "guardian.governance-outcomes.v1",
   "status": "proposed_pending_component_acceptance",
   "source_plan": "Guardian Final Team Architecture and Implementation Plan v4.0",
-  "base_commit": "d56fb5b",
+  "base_commit": "ca87b8d",
   "release_commit": null,
-  "decision_record": "contracts/decisions/0003-model-tools-worker.md",
+  "decision_record": "contracts/decisions/0004-governance-outcomes.md",
   "runtime_versions": {
-    "graph_version": "guardian.graph.v6",
-    "state_version": "guardian.state.v6",
+    "graph_version": "guardian.graph.v7",
+    "state_version": "guardian.state.v7",
     "validator_version": "guardian.validator.v2",
     "canonicalization_version": "guardian.sorted-json-sha256.v1",
     "prompt_version": "guardian.bounded-stages.v2",
@@ -37,7 +37,7 @@
     },
     {
       "name": "request",
-      "schema_id": "guardian.analysis-request.v4",
+      "schema_id": "guardian.analysis-request.v5",
       "producer": "backend_drift",
       "consumers": [
         "orchestration"
@@ -46,7 +46,7 @@
     },
     {
       "name": "report",
-      "schema_id": "guardian.report.v6",
+      "schema_id": "guardian.report.v7",
       "producer": "orchestration",
       "consumers": [
         "backend",
@@ -158,7 +158,7 @@
     },
     {
       "name": "work_item",
-      "schema_id": "guardian.work-item.v1",
+      "schema_id": "guardian.work-item.v2",
       "producer": "orchestration_worker",
       "consumers": [
         "backend_delivery"
@@ -167,10 +167,37 @@
     },
     {
       "name": "work_outcome",
-      "schema_id": "guardian.work-outcome.v1",
+      "schema_id": "guardian.work-outcome.v2",
       "producer": "orchestration_worker",
       "consumers": [
         "backend_delivery"
+      ],
+      "acceptance": "pending"
+    },
+    {
+      "name": "governed_decision",
+      "schema_id": "guardian.governed-decision.v1",
+      "producer": "backend_executor",
+      "consumers": [
+        "orchestration"
+      ],
+      "acceptance": "pending"
+    },
+    {
+      "name": "preflight",
+      "schema_id": "guardian.preflight.v1",
+      "producer": "backend_executor",
+      "consumers": [
+        "orchestration"
+      ],
+      "acceptance": "pending"
+    },
+    {
+      "name": "execution_receipt",
+      "schema_id": "guardian.execution-receipt.v1",
+      "producer": "backend_executor",
+      "consumers": [
+        "orchestration"
       ],
       "acceptance": "pending"
     }

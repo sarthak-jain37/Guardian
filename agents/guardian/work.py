@@ -10,10 +10,10 @@ from .lifecycle import RunStatus
 
 
 class WorkItem(Contract):
-    schema_version: Literal["guardian.work-item.v1"] = "guardian.work-item.v1"
+    schema_version: Literal["guardian.work-item.v2"] = "guardian.work-item.v2"
     work_id: ID
     run_id: ID
-    kind: Literal["analyze", "resume", "revision"]
+    kind: Literal["analyze", "resume", "revision", "reconcile"]
     request: AnalysisRequest | None = None
     decision_id: ID | None = None
     revision_request_id: ID | None = None
@@ -26,13 +26,16 @@ class WorkItem(Contract):
         elif self.kind == "resume":
             if not self.decision_id or self.request is not None or self.revision_request_id:
                 raise ValueError("resume delivery contains only a decision ID")
+        elif self.kind == "reconcile":
+            if self.request is not None or self.decision_id or self.revision_request_id:
+                raise ValueError("reconciliation delivery contains only its run ID")
         elif not self.revision_request_id or self.request is not None or self.decision_id:
             raise ValueError("revision delivery contains only its stored revision ID")
         return self
 
 
 class WorkOutcome(Contract):
-    schema_version: Literal["guardian.work-outcome.v1"] = "guardian.work-outcome.v1"
+    schema_version: Literal["guardian.work-outcome.v2"] = "guardian.work-outcome.v2"
     work_id: ID
     run_id: ID
     status: RunStatus

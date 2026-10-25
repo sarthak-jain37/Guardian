@@ -12,6 +12,7 @@ from ..evidence_tools import AccessResult, ToolResult
 
 
 class LocalTestStore:
+    authoritative = False
     def __init__(self, path: str | Path, clock=utc_now):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(str(path))
@@ -40,6 +41,13 @@ class LocalTestStore:
 
     def model_call_count(self, run_id: str) -> int:
         return self.connection.execute("SELECT count(*) FROM model_calls WHERE run_id=?", (run_id,)).fetchone()[0]
+
+    def begin_action(self, action_key):
+        # A crash after reservation is uncertain: replay may only reconcile.
+        with self.connection:
+            cursor = self.connection.execute("INSERT OR IGNORE INTO records VALUES (?,?,?)",
+                                             ("action_dispatch", action_key, "{}"))
+        return cursor.rowcount == 1
 
     def model_repair_count(self, run_id, stage):
         return self.connection.execute("SELECT count(*) FROM records WHERE kind='model_repair' AND id=?",
@@ -266,6 +274,7 @@ class FixtureEvidencePort:
 
 
 class SimulatedVerificationPort:
+    simulation_only = True
     def check_adoption(self, evidence):
         if evidence.source_mode != "fixture":
             raise ValueError("simulated checks accept fixtures only")
@@ -279,6 +288,7 @@ class SimulatedVerificationPort:
 
 
 class PreviewVerificationPort:
+    simulation_only = True
     def check_adoption(self, evidence):
         return [{"gate_id": "backend_adoption", "result": "unknown", "reasons": ["governance_unavailable"]}]
 

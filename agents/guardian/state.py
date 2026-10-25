@@ -32,3 +32,6 @@ class GuardianState(TypedDict, total=False):
     model_config_hash: str
     tool_results: list[dict]
     started_at: str
+    execution_outcome: dict | None
+    preflight: dict | None
+    recovery_authority_id: str | None

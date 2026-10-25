@@ -18,6 +18,8 @@ from .state import GuardianState
 from .versions import GRAPH_VERSION, current_versions, require_compatible_state
 from .modeling import call_model, model_config, model_input
 from .evidence_tools import allowed_lookups, validate_lookup, validate_result
+from .governance import (GovernancePort, GovernedDecision, action_key, receipt_status,
+                         validate_preflight, validate_receipt)
 
 
 @dataclass
@@ -30,6 +32,13 @@ class Runtime:
     clock: Callable = utc_now
     budget: BudgetPort | None = None
     baseline: BaselinePort | None = None
+    governance: GovernancePort | None = None
+
+
+def governed_transport(runtime):
+    return (runtime.governance is not None and not runtime.governance.simulation_only
+            and getattr(runtime.review, "authoritative", False)
+            and not getattr(runtime.verification, "simulation_only", True))
 
 
 def event(state, node, **details):
@@ -50,7 +59,8 @@ def report(state, runtime):
             "investigation": state.get("investigation"), "plan": state.get("plan"),
             "readiness": state.get("readiness"),
             "model_status": state.get("model_status"), "model_calls": state.get("model_calls", 0),
-            "lookup_calls": state.get("lookup_calls", 0), "trace": state.get("trace", [])}).model_dump(mode="json")
+            "lookup_calls": state.get("lookup_calls", 0), "trace": state.get("trace", []),
+            "execution_outcome": state.get("execution_outcome")}).model_dump(mode="json")
 
 
 def build_graph(runtime: Runtime, checkpointer):
@@ -72,6 +82,7 @@ def build_graph(runtime: Runtime, checkpointer):
                 "analysis_producer": runtime.model.producer,
                 "model_config_hash": model_config(runtime.model).fingerprint(),
                 "tool_results": [],
+                "execution_outcome": None, "preflight": None, "recovery_authority_id": None,
                 "trace": event(state, "accept_case", graph_version=GRAPH_VERSION)}
 
     def load_evidence(state):
@@ -126,7 +137,8 @@ def build_graph(runtime: Runtime, checkpointer):
         req = AnalysisRequest.model_validate(state["request"])
         gates = adoption_gates(e, runtime.verification, runtime.clock())
         simulation = req.mode == "simulation"
-        transport = simulation and runtime.baseline is not None and runtime.baseline.simulation_only
+        transport = ((simulation and runtime.baseline is not None and runtime.baseline.simulation_only)
+                     or (req.mode == "governed" and governed_transport(runtime)))
         gates.append(Gate(gate_id="adoption_transport", result="pass" if transport else "unknown",
                           reasons=[] if transport else ["production_governance_unavailable"]))
         proposal = adoption_proposal(req, e, state["versions"], gates, runtime.clock())
@@ -332,10 +344,10 @@ def build_graph(runtime: Runtime, checkpointer):
         simulation = req.mode == "simulation"
         if simulation and (e.source_mode != "fixture" or not runtime.execution.simulation_only):
             raise ValueError("simulation cannot use captured evidence or real executor")
-        # Captured/live previews cannot acquire executable authority through local checks.
-        ready = ready and simulation
-        gates.append(Gate(gate_id="execution_transport", result="pass" if simulation else "unknown",
-                          reasons=[] if simulation else ["production_governance_unavailable"]))
+        transport = simulation or (req.mode == "governed" and governed_transport(runtime))
+        ready = ready and transport
+        gates.append(Gate(gate_id="execution_transport", result="pass" if transport else "unknown",
+                          reasons=[] if transport else ["production_governance_unavailable"]))
         readiness = ReadinessAssessment(
             policy_version=e.policy.policy_version, evidence_revision=e.revision, gates=gates,
             allowed_removal_ids=sorted(eligible),
@@ -376,7 +388,7 @@ def build_graph(runtime: Runtime, checkpointer):
                                  "action": state["proposal"]["action"],
                                  "approval_hash": state["proposal"]["approval_hash"],
                                  "review_expires_at": state["proposal"]["review_expires_at"],
-                                 "message": "Resume with a stored local TEST decision ID only."})
+                                 "message": "Resume with a stored decision ID only; delivery supplies no authority."})
         return {"decision_id": decision_id, "trace": event(state, "await_review", outcome="resumed")}
 
     def revalidate(state):
@@ -384,7 +396,14 @@ def build_graph(runtime: Runtime, checkpointer):
             if not isinstance(state.get("decision_id"), str):
                 raise ValueError("resume_requires_decision_id")
             proposal = runtime.review.get_proposal(state["proposal"]["proposal_id"])
-            decision: ApprovalDecision = runtime.review.get_decision(state["decision_id"])
+            if proposal.model_dump(exclude={"status"}) != Proposal.model_validate(state["proposal"]).model_dump(exclude={"status"}):
+                raise ValueError("stored_proposal_content_changed")
+            decision = runtime.review.get_decision(state["decision_id"])
+            governed = state["request"]["mode"] == "governed" and governed_transport(runtime)
+            if governed:
+                decision = GovernedDecision.model_validate(decision)
+            else:
+                decision = ApprovalDecision.model_validate(decision)
             now = runtime.clock()
             proposal_status = runtime.review.get_proposal_status(proposal.proposal_id)
             recovering_context = (proposal_status == "SUPERSEDED" and decision.kind == "request_context"
@@ -394,7 +413,12 @@ def build_graph(runtime: Runtime, checkpointer):
             if (decision.proposal_id != proposal.proposal_id or decision.revision != proposal.revision
                     or decision.approval_hash != proposal.approval_hash or decision.target_uid != proposal.target.uid
                     or decision.policy_version != proposal.policy_version or decision.revoked
-                    or decision.authority != "human" or not proposal.simulation or not decision.simulation
+                    or decision.decision_id != state["decision_id"]
+                    or proposal.approval_hash != state["proposal"]["approval_hash"]
+                    or proposal.run_id != state["request"]["run_id"]
+                    or decision.authority != "human"
+                    or (not governed and (not proposal.simulation or not decision.simulation))
+                    or (governed and (proposal.simulation or decision.simulation))
                     or decision.approved_at < proposal.published_at
                     or decision.approved_at >= proposal.review_expires_at or decision.approved_at > now):
                 raise ValueError("invalid_or_revoked_decision")
@@ -415,9 +439,14 @@ def build_graph(runtime: Runtime, checkpointer):
                 raise ValueError("material_evidence_changed")
             if proposal.action == "adopt_baseline":
                 gates = adoption_gates(current, runtime.verification, now)
-                if (runtime.baseline is None or not runtime.baseline.simulation_only
+                if ((not governed and (runtime.baseline is None or not runtime.baseline.simulation_only))
                         or any(g.result != "pass" for g in gates)):
                     raise ValueError("current_adoption_readiness_failed")
+                if governed:
+                    checked = validate_preflight(runtime.governance.preflight(proposal.proposal_id, decision.decision_id,
+                                                  action_key(proposal, decision.decision_id)), proposal, decision, now)
+                    return {"status": "EXECUTION_REQUESTED", "reason": None, "preflight": checked.model_dump(mode="json"),
+                            "trace": event(state, "revalidate", outcome="backend_preflight_passed")}
                 return {"status": "EXECUTION_REQUESTED", "reason": None,
                         "trace": event(state, "revalidate", decision_kind=decision.kind, outcome="simulated_adoption_authority_valid")}
             facts, gates = build_facts(current, now)
@@ -428,12 +457,20 @@ def build_graph(runtime: Runtime, checkpointer):
                                    "verification_unavailable")
             if any(g.result != "pass" for g in checks):
                 raise ValueError("backend_readiness_failed")
+            if governed:
+                checked = validate_preflight(runtime.governance.preflight(proposal.proposal_id, decision.decision_id,
+                                              action_key(proposal, decision.decision_id)), proposal, decision, now)
+                return {"status": "EXECUTION_REQUESTED", "reason": None, "preflight": checked.model_dump(mode="json"),
+                        "recovery_authority_id": decision.recovery_authority_id,
+                        "trace": event(state, "revalidate", outcome="backend_preflight_passed")}
             return {"status": "EXECUTION_REQUESTED", "reason": None,
                     "trace": event(state, "revalidate", decision_kind=decision.kind, outcome="simulated_authority_valid")}
         except (LookupError, ValueError, TypeError) as exc:
             return {"status": "STALE", "reason": str(exc)[:300], "trace": event(state, "revalidate", outcome="blocked")}
 
     def request_execution(state):
+        if state["request"]["mode"] == "governed":
+            return dispatch_governed(state)
         proposal = state["proposal"]
         key = canonical_hash([proposal["proposal_id"], state["decision_id"], proposal["approval_hash"]])
         try:
@@ -443,6 +480,8 @@ def build_graph(runtime: Runtime, checkpointer):
         return {"receipt": receipt, "trace": event(state, "request_execution", outcome="recorded_only")}
 
     def commit_baseline_adoption(state):
+        if state["request"]["mode"] == "governed":
+            return dispatch_governed(state)
         p = state["proposal"]
         key = canonical_hash([p["proposal_id"], state["decision_id"], p["approval_hash"]])
         try:
@@ -453,6 +492,35 @@ def build_graph(runtime: Runtime, checkpointer):
             return {"status": "STALE", "reason": str(exc), "trace": event(state, "commit_baseline_adoption", outcome="blocked")}
         return {"receipt": receipt, "trace": event(state, "commit_baseline_adoption", outcome="recorded_only")}
 
+    def dispatch_governed(state):
+        proposal = Proposal.model_validate(state["proposal"])
+        key = action_key(proposal, state["decision_id"])
+        try:
+            if not governed_transport(runtime):
+                raise ValueError("governance_unavailable")
+            # Replays first recover a durable receipt; expiry does not prevent
+            # reconciliation of an already-issued action.
+            receipt = runtime.governance.get_receipt(key)
+            if receipt is None:
+                if not runtime.budget.begin_action(key):
+                    raise ValueError("dispatch_outcome_unknown")
+                if datetime.fromisoformat(state["preflight"]["expires_at"]) <= runtime.clock():
+                    return {"status": "STALE", "reason": "preflight_expired",
+                            "trace": event(state, "request_execution", outcome="blocked")}
+                receipt = runtime.governance.request(proposal.proposal_id, state["decision_id"], key, proposal.action)
+            receipt = validate_receipt(receipt, proposal, state["decision_id"], runtime.clock(),
+                                       previous=state.get("execution_outcome"),
+                                       recovery_authority_id=state.get("recovery_authority_id"))
+            runtime.governance.record_outcome(proposal.run_id, receipt)
+        except Exception:
+            # No automatic retry of a possibly-issued request, and no raw backend
+            # response/credential is copied into checkpoint errors.
+            return {"status": "NEEDS_MANUAL_INTERVENTION", "reason": "execution_outcome_unavailable",
+                    "trace": event(state, "request_execution", outcome="reconciliation_required")}
+        return {"receipt": receipt.model_dump(mode="json"), "execution_outcome": receipt.model_dump(mode="json"),
+                "status": receipt_status(receipt), "reason": None,
+                "trace": event(state, "request_execution", outcome=receipt.phase, receipt_id=receipt.receipt_id)}
+
     def finalize(state):
         require_compatible_state(state)
         updates = {}
@@ -461,6 +529,8 @@ def build_graph(runtime: Runtime, checkpointer):
         if state.get("proposal"):
             runtime.review.publish(Proposal.model_validate(state["proposal"]), report(state, runtime))
             status = {"REJECTED": "REJECTED", "EXECUTION_REQUESTED": "APPROVED", "BLOCKED": "BLOCKED"}.get(state["status"])
+            if state.get("execution_outcome"):
+                status = "APPROVED"
             if state["status"] == "STALE":
                 status = "EXPIRED" if state.get("reason") == "execution_window_expired" else "SUPERSEDED"
             if status:

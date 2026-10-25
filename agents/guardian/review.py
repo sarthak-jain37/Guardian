@@ -28,7 +28,7 @@ def adoption_gates(evidence, verification, now):
 
 def adoption_proposal(request, evidence, versions, gates, now):
     simulation = request.mode == "simulation"
-    ready = simulation and all(g.result == "pass" for g in gates)
+    ready = request.mode != "preview" and all(g.result == "pass" for g in gates)
     rendered = render(evidence, set())
     rendered.update(patch=[], diff="")
     evidence_hash = canonical_hash(evidence.model_dump(mode="json"))
