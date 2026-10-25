@@ -61,6 +61,33 @@ def permission_points(identity):
     return points
 
 
+def event_result(event):
+    """Describe captured outcomes without inferring success from an observation."""
+    if event.get('outcome'):
+        return str(event['outcome'])
+    if event.get('verdict'):
+        return str(event['verdict'])
+    kind = event.get('kind', '')
+    if kind == 'process_exec':
+        return 'Execution observed'
+    if kind == 'process_exit':
+        parts = []
+        if event.get('status') is not None:
+            parts.append('Exit status: ' + str(event['status']))
+        if event.get('signal'):
+            parts.append('Signal: ' + str(event['signal']))
+        return ' · '.join(parts) or 'Exit observed; status not captured'
+    if kind.startswith('process_'):
+        values = (event.get('runtime') or {}).get('return_value') or {}
+        for key in ('int_arg', 'long_arg', 'uint_arg'):
+            if values.get(key) is not None:
+                return 'Kernel return value: ' + str(values[key])
+        return 'Outcome not captured'
+    if kind == 'pod_configuration_change':
+        return 'Change observed'
+    return 'Outcome not captured'
+
+
 def event_summary(event):
     kind = event.get('kind','')
     if kind == 'kubernetes_audit':
@@ -113,7 +140,7 @@ def representative_events(events, limit):
 
 
 def compact_event(event):
-    result={k:event[k] for k in ('id','timestamp','observed_at','source','kind','findings','verdict','drop_reason','http','dns','verb','target','status_code','outcome','actor','token_pod_uid','source_pod','destination_pod','process','parent_binary','function_name','policy_name') if k in event}
+    result={k:event[k] for k in ('id','timestamp','observed_at','source','kind','findings','verdict','drop_reason','http','dns','verb','target','status_code','outcome','actor','token_pod_uid','source_pod','destination_pod','process','parent_binary','function_name','policy_name','status','signal') if k in event}
     runtime=event.get('runtime') or {}
     if runtime:
         result['runtime']={k:runtime[k] for k in ('file_paths','numeric_arguments','return_value','parent') if runtime.get(k)}

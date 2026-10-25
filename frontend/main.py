@@ -10,7 +10,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
 import requests
 import streamlit as st
 from backend.app.core.config import BACKEND_URL
-from backend.app.services.pod_review import permission_points, event_summary, SIGNALS
+from backend.app.services.pod_review import permission_points, event_summary, event_result, SIGNALS
 from frontend.graph_view import render_graph
 
 st.set_page_config(page_title='Guardian · Cluster observability',page_icon='🛡️',layout='wide',initial_sidebar_state='collapsed')
@@ -69,7 +69,7 @@ def active_pod():
 def event_table(events,key):
     if not events:
         st.info('No matching observations in the retained sample.');return
-    rows=[{'When':timestamp(e.get('timestamp') or e.get('observed_at')),'Pod':e.get('source_pod',{}).get('pod') or 'Shared identity','Activity':event_summary(e),'Source':e.get('source',''),'Result':e.get('outcome') or e.get('verdict') or '', 'Evidence ID':e['id'][:12]} for e in events]
+    rows=[{'When':timestamp(e.get('timestamp') or e.get('observed_at')),'Pod':e.get('source_pod',{}).get('pod') or 'Shared identity','Activity':event_summary(e),'Source':e.get('source',''),'Result':event_result(e), 'Evidence ID':e['id'][:12]} for e in events]
     st.dataframe(rows,hide_index=True,width='stretch')
     with st.expander('Inspect an observation'):
         chosen=st.selectbox('Observation',list(range(len(events))),format_func=lambda i:rows[i]['When']+' · '+rows[i]['Activity'],key=key+'_event')
@@ -213,7 +213,9 @@ def pod_workspace():
         if shared:st.warning(str(len(shared))+' sampled audit events use the same service account but cannot be confidently attributed to this pod.')
     with tabs[1]:render_graph(api('/telemetry/graph',{'namespace':ns,'limit':2500}),focus=(ns,pod))
     with tabs[2]:permission_view(identity)
-    with tabs[3]:event_table([e for e in events if e['kind'].startswith('process_')],'runtime')
+    with tabs[3]:
+        st.caption('Execution observed confirms a process event. Exit status describes process termination; kernel return values depend on the traced function. Outcome not captured means no return result was recorded.')
+        event_table([e for e in events if e['kind'].startswith('process_')],'runtime')
     with tabs[4]:
         st.subheader('Actions attributed to this pod’s credentials');event_table([e for e in events if e['kind']=='kubernetes_audit'],'api_actions')
         with st.expander('Shared service-account activity with uncertain pod attribution'):event_table(record.get('shared_identity_audit_events',[]),'shared_api')
