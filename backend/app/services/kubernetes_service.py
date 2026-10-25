@@ -1,3 +1,4 @@
+import os
 from kubernetes import client, config
 from kubernetes.client.api_client import ApiClient
 
@@ -16,7 +17,7 @@ class KubernetesService:
         try:
             config.load_incluster_config()
         except config.ConfigException:
-            config.load_kube_config()
+            config.load_kube_config(config_file=os.getenv("KUBECONFIG"))
 
         self.api_client = ApiClient()
         self.rbac_api = client.RbacAuthorizationV1Api(self.api_client)
