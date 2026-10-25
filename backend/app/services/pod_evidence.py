@@ -140,4 +140,4 @@ async def pod_evidence(service, namespace=None, pod=None, limit=100):
         result.append({'identity': identity, 'events': direct[:limit], 'shared_identity_audit_events': shared[:limit],
                        'attribution_note': 'Token pod UID identifies the credential binding, not proof of the physical caller; name-only runtime correlation can include recreated pods.'})
     return {'inventory_observed_at': snapshot.get('observed_at'), 'coverage': service.health,
-            'pods': result, 'event_limit_per_pod': limit, 'scoring_enabled': False, 'remediation_enabled': False}
+            'pods': result, 'event_limit_per_pod': limit, 'scoring_enabled': True, 'remediation_enabled': False}

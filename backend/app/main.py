@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+from backend.app.services.grading import PodGrader
 from backend.app.services.telemetry import Telemetry
 from backend.app.services.pod_evidence import refresh_inventory
 from backend.app.api.routes.telemetry import router as telemetry_router
@@ -30,7 +31,9 @@ async def lifespan(app: FastAPI):
     app.state.redis = redis
     app.state.k8s = k8s
     app.state.telemetry = Telemetry(redis)
+    app.state.pod_grader = PodGrader(app.state.telemetry)
     telemetry_tasks = app.state.telemetry.start()
+    telemetry_tasks.append(asyncio.create_task(app.state.pod_grader.run()))
     telemetry_tasks.append(asyncio.create_task(refresh_inventory(app.state.telemetry, k8s)))
 
     # Seed dangerous permissions cache on application startup

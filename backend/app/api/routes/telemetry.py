@@ -94,14 +94,37 @@ async def pod_review_context(request: Request, namespace: str, pod: str, limit: 
 
 @router.post('/pods/{namespace}/{pod}/review')
 async def review_selected_pod(request: Request, namespace: str, pod: str, body: PodReviewInput):
-    from agents.summarizer import analyse_document
     document = await pod_review_context(request, namespace, pod, body.event_limit)
     document['operator_question'] = body.question
+    result = await request.app.state.pod_grader.review(document, force=True)
+    return {**result, 'analysis': '\n\n'.join(result.get('reasons', [])) + '\n\nUncertainty: ' + result.get('uncertainty', ''),
+            'event_ids': result.get('evidence_ids', [])}
+
+
+@router.get('/reviews')
+async def reviews(request: Request, namespace: str | None = None):
+    grader = request.app.state.pod_grader
+    return {'worker': grader.health, 'reviews': await grader.records('reviews', namespace)}
+
+
+@router.get('/alerts')
+async def alerts(request: Request, namespace: str | None = None):
+    grader = request.app.state.pod_grader
+    records = await grader.records('alerts', namespace)
+    return {'alerts': records, 'unread': sum(r['active'] and not r['acknowledged'] for r in records),
+            'worker': grader.health}
+
+
+class AcknowledgeInput(BaseModel):
+    version: int = Field(ge=1)
+
+
+@router.post('/alerts/{uid}/acknowledge')
+async def acknowledge_alert(request: Request, uid: str, body: AcknowledgeInput):
     try:
-        analysis = await asyncio.to_thread(analyse_document, document)
+        result = await request.app.state.pod_grader.acknowledge(uid, body.version)
     except ValueError as exc:
-        raise HTTPException(413, 'The selected evidence exceeds the local model context. Choose fewer observations or configure a larger context.') from exc
-    ids = list(dict.fromkeys(e['id'] for e in document['events'] + document['shared_identity_events']))
-    return {'cluster': document['cluster'], 'namespace': namespace, 'pod': pod,
-            'reviewed_at': datetime.now(timezone.utc).isoformat(), 'analysis': analysis,
-            'event_ids': ids, 'sample': document['sample'], 'scoring_enabled': False, 'remediation_enabled': False}
+        raise HTTPException(409, str(exc)) from exc
+    if result is None:
+        raise HTTPException(404, 'Alert not found or expired')
+    return result

@@ -101,10 +101,91 @@ def permission_view(identity):
         st.dataframe(rows,hide_index=True,width='stretch')
 
 
+def assessment_view(result):
+    state=result.get('status','pending')
+    severity=result.get('severity')
+    if state=='error':
+        st.error('Review error: the local model did not produce a valid assessment. No grade was assigned.')
+    elif state=='insufficient_evidence':
+        st.info('Insufficient evidence — no severity grade assigned.')
+    elif state=='superseded':
+        st.warning('This pod instance changed during review. Await a review of its current UID.')
+    elif severity is not None:
+        st.metric('Model-assessed severity',str(severity)+' / 10')
+    st.caption('Assessed '+timestamp(result.get('reviewed_at'))+' · Pod UID: '+str(result.get('uid','unknown'))+' · Advisory model assessment requiring verification')
+    for reason in result.get('reasons',[]):st.text('• '+reason)
+    st.text('Uncertainty: '+result.get('uncertainty','Not reported'))
+    if result.get('next_checks'):
+        st.write('**Recommended human checks**')
+        for check in result['next_checks']:st.text('• '+check)
+    with st.expander('Cited evidence and collection coverage'):
+        st.write(result.get('evidence_ids',[]))
+        st.json({'attributed_evidence': result.get('evidence',[]), 'shared_identity_evidence': result.get('shared_identity_evidence',[])},expanded=False)
+        st.json({'sample':result.get('sample'), 'coverage':result.get('coverage')},expanded=False)
+    st.caption('0–2 low concern in the sample · 3–4 needs checking · 5–6 concerning · 7–8 dangerous · 9–10 critical. A low grade does not prove safety. No automated remediation.')
+
+
+@st.fragment(run_every='10s')
+def continuous_assessment(uid):
+    data=api('/telemetry/reviews')
+    worker=data['worker']
+    st.caption('Continuous review: '+worker.get('state','unknown')+' · Checks for changed evidence every '+str(worker['interval_seconds'])+'s after each serial review cycle.'+(' Reviewing '+str(worker['current_pod']) if worker.get('current_pod') else ''))
+    result=next((r for r in data['reviews'] if r['uid']==uid),None)
+    if result:assessment_view(result)
+    else:st.info('Awaiting the first background assessment of this pod. CPU model reviews run one at a time.')
+
+
+@st.fragment(run_every='10s')
+def alert_banner():
+    # Cross-namespace alerts remain visible even while investigating one namespace.
+    data=api('/telemetry/alerts')
+    active=[a for a in data['alerts'] if a['active']]
+    if active:
+        st.error(str(len(active))+' pod alert(s) need human investigation · '+str(data['unread'])+' unread. Model assessments require verification.')
+        for alert in active[:3]:
+            label=html.escape(alert['namespace']+'/'+alert['pod'])
+            url='/pod?'+urlencode({'namespace':alert['namespace'],'pod':alert['pod']})
+            st.markdown('['+label+']('+url+') · severity **'+str(alert['severity'])+'/10**'+(' · acknowledged' if alert['acknowledged'] else ' · UNREAD'))
+        st.markdown('[Open Alerts and acknowledge assessments](/alerts)')
+    else:
+        st.caption('Alerts: '+str(data['unread'])+' unread · Continuous review '+data['worker'].get('state','unknown')+' · In-dashboard notifications only')
+
+
+def alerts_page():
+    st.title('Pod alerts')
+    st.write('Persistent local-model assessments. Acknowledgement marks an alert read; it does not revoke permissions or establish that the pod is safe.')
+    @st.fragment(run_every='10s')
+    def contents():
+        data=api('/telemetry/alerts',ns_params())
+        st.caption('Alert threshold: '+str(data['worker']['alert_threshold'])+'/10 · Notifications refresh every 10 seconds while this dashboard is open.')
+        records=data['alerts']
+        if not records:st.info('No alerts have been recorded for this namespace. Check the Reviews below for pending assessments or errors.')
+        for alert in sorted(records,key=lambda a:(a['active'],not a['acknowledged'],a['severity']),reverse=True):
+            with st.container(border=True):
+                st.subheader(alert['namespace']+'/'+alert['pod'])
+                st.write(('Active — needs investigation' if alert['active'] else 'Latest valid assessment is below the alert threshold')+' · '+('Acknowledged' if alert['acknowledged'] else ('Unread' if alert['active'] else 'Unacknowledged history')))
+                current=next((p for p in all_pods if p.get('uid')==alert['uid']),None)
+                if current is None:st.caption('Historical pod instance; this UID is absent from the current inventory.')
+                assessment_view(alert)
+                url='/pod?'+urlencode({'namespace':alert['namespace'],'pod':alert['pod']})
+                st.markdown('[Open pod workspace]('+url+')')
+                if not alert['acknowledged'] and st.button('Acknowledge',key='ack_'+alert['id']):
+                    response=requests.post(BACKEND_URL+'/telemetry/alerts/'+quote(alert['id'],safe='')+'/acknowledge',json={'version':alert['version']},timeout=15)
+                    if response.ok:st.cache_data.clear();st.rerun()
+                    else:st.error('Alert changed or acknowledgement failed. Refresh and try again.')
+        st.subheader('Continuous pod reviews')
+        reviews=api('/telemetry/reviews',ns_params())
+        st.json(reviews['worker'],expanded=False)
+        st.dataframe([{'Pod':r['namespace']+'/'+r['pod'],'Status':r['status'],'Severity /10':r.get('severity'),'Assessed':timestamp(r['reviewed_at']),'UID':r['uid']} for r in reviews['reviews']],hide_index=True,width='stretch')
+    contents()
+
+
 def review_panel(identity):
     ns,pod=identity['namespace'],identity['pod']
     path='/telemetry/pods/'+quote(ns,safe='')+'/'+quote(pod,safe='')
-    st.subheader('Review this pod with the local model')
+    st.subheader('Continuous severity assessment')
+    continuous_assessment(identity.get('uid'))
+    st.subheader('Request a fresh model review')
     st.write('Ask about this pod’s behavior. The review combines its permissions, distinct observed actions, configured boundaries and collection gaps.')
     question=st.text_area('What do you want to understand?',value='Assess whether this pod needs investigation. Explain what the evidence proves and what remains uncertain.',height=90,key='question_'+ns+'/'+pod)
     count=st.select_slider('Evidence records to sample',options=[3,5,8,12,20,30],value=8,key='review_limit_'+ns+'/'+pod)
@@ -127,19 +208,8 @@ def review_panel(identity):
         except requests.RequestException as exc:st.error('The local model did not complete: '+str(exc))
     result=st.session_state.get('review_'+ns+'/'+pod)
     if result:
-        st.subheader('Model interpretation')
-        st.caption('Reviewed '+timestamp(result.get('reviewed_at'))+' · '+str(len(result.get('event_ids',[])))+' evidence IDs · local advisory analysis')
-        analysis=result.get('analysis','')
-        supplied=result.get('event_ids',[])
-        cited=[event_id for event_id in supplied if event_id in analysis or event_id[:12] in analysis]
-        if supplied and not cited:
-            st.warning('The model did not cite the supplied evidence IDs. Treat these claims as unverified and compare them with the observations below.')
-        # Render model text without remote image embeds or executable HTML.
-        import re
-        analysis=re.sub(r'!\[[^\]]*\]\([^)]*\)','[image omitted]',analysis)
-        st.markdown(analysis)
-        with st.expander('Supporting evidence IDs'):st.write(result.get('event_ids',[]))
-        st.caption('Check the cited evidence before acting. Model interpretation does not establish compromise.')
+        st.subheader('Requested assessment')
+        assessment_view(result)
 
 
 def overview():
@@ -284,7 +354,7 @@ namespace=None if chosen_namespace=='All namespaces' else chosen_namespace
 if bar3.button('Refresh data',width='stretch'):st.cache_data.clear();st.rerun()
 nav_pages=[st.Page(overview,title='Overview',url_path='overview',default=True),st.Page(connections,title='Connections',url_path='connections')]
 pod_page=st.Page(pod_workspace,title='Pod workspace',url_path='pod')
-nav_pages.extend([pod_page,st.Page(permissions_page,title='Permissions',url_path='permissions'),st.Page(evidence_page,title='Evidence',url_path='evidence'),st.Page(llm_page,title='LLM review',url_path='review')])
+nav_pages.extend([pod_page,st.Page(permissions_page,title='Permissions',url_path='permissions'),st.Page(evidence_page,title='Evidence',url_path='evidence'),st.Page(llm_page,title='LLM review',url_path='review'),st.Page(alerts_page,title='Alerts',url_path='alerts')])
 current_page=st.navigation(nav_pages,position='hidden')
 links=[]
 for item in nav_pages:
@@ -292,4 +362,5 @@ for item in nav_pages:
     selected=' class="active"' if item.title==current_page.title else ''
     links.append('<a href="'+href+'" target="_self"'+selected+'>'+html.escape(item.title)+'</a>')
 st.markdown('<style>.guardian-nav{display:flex;gap:6px;flex-wrap:wrap;padding:12px 0 18px;border-bottom:1px solid #24344c;margin-bottom:22px}.guardian-nav a{color:#a9bdd2!important;padding:9px 12px;border-radius:7px;font-size:14px;text-decoration:none}.guardian-nav a:hover{background:#17283c}.guardian-nav a.active{background:#203a56;color:#eaf4ff!important;font-weight:600}</style><nav class="guardian-nav" aria-label="Guardian features">'+''.join(links)+'</nav>',unsafe_allow_html=True)
+alert_banner()
 current_page.run()

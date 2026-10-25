@@ -143,7 +143,7 @@ def compact_event(event):
     result={k:event[k] for k in ('id','timestamp','observed_at','source','kind','findings','verdict','drop_reason','http','dns','verb','target','status_code','outcome','actor','token_pod_uid','source_pod','destination_pod','process','parent_binary','function_name','policy_name','status','signal') if k in event}
     runtime=event.get('runtime') or {}
     if runtime:
-        result['runtime']={k:runtime[k] for k in ('file_paths','numeric_arguments','return_value','parent') if runtime.get(k)}
+        result['runtime']={k:runtime[k] for k in ('file_paths','numeric_arguments','return_value','parent','cap','ns') if runtime.get(k)}
     if event.get('changes'):
         result['changed_fields']=list(event['changes'])
     result['description']=event_summary(event)
@@ -163,4 +163,4 @@ async def review_context(service, namespace, pod, limit=12):
             'boundaries':[b for b in service.boundaries if b.get('namespace')==namespace and b.get('pod',pod)==pod],
             'coverage':service.health,'inventory_observed_at':evidence['inventory_observed_at'],
             'sample':{'selected':len(selected),'retained_attributed_events':len(record['events']),'shared_identity_events':len(record['shared_identity_audit_events']),'strategy':'Distinct actions prioritized by observed signals; normal observations are also sampled. Not a complete history.'},
-            'limitations':['Permissions are current RBAC grants, not proof of misuse.','Token pod UID binds credentials, not the physical caller.','Shared identity events do not prove this pod acted.','No score or automated remediation is enabled.']}
+            'limitations':['Permissions are current RBAC grants, not proof of misuse.','Token pod UID binds credentials, not the physical caller.','Shared identity events do not prove this pod acted.','Severity is an advisory model assessment; automated remediation is disabled.']}

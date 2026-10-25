@@ -33,3 +33,13 @@ class SummarizerTests(unittest.TestCase):
         self.model.client.create_chat_completion.return_value['choices'][0]['finish_reason']='length'
         response=self.module.analyse_document({'events':[]})
         self.assertIn('may be incomplete',response)
+
+    def test_grading_requests_schema_and_rejects_truncation(self):
+        self.model.client.create_chat_completion.return_value={'choices':[{'message':{'content':'{"severity": null}'}}]}
+        result=self.module.grade_document({'events':[]})
+        self.assertIsNone(result['severity'])
+        args=self.model.client.create_chat_completion.call_args.kwargs
+        self.assertEqual(args['response_format']['type'],'json_object')
+        self.assertIn('severity',args['response_format']['schema']['oneOf'][0]['properties'])
+        self.model.client.create_chat_completion.return_value['choices'][0]['finish_reason']='length'
+        with self.assertRaises(ValueError):self.module.grade_document({'events':[]})

@@ -186,3 +186,38 @@ The Kubernetes client explicitly honors KUBECONFIG set through dotenv. The
 frontend requires Streamlit 1.63 or newer. llama-cpp-python is now declared as
 an application dependency; CPU wheels may be installed from the upstream
 project's wheel index when a local source build is unsuitable.
+
+### Continuous severity assessments and dashboard alerts
+
+The backend reviews each current pod serially, checks again 60 seconds after each
+cycle, and skips successful reviews whose sampled evidence, permissions, pod UID,
+boundaries and collector states are unchanged. A slow CPU model can make a full
+cycle take longer than 60 seconds. `POD_REVIEW_ENABLED`, `POD_REVIEW_INTERVAL`,
+`POD_REVIEW_EVENT_LIMIT`, `POD_ALERT_THRESHOLD` and `LLM_GRADE_MAX_TOKENS` configure it.
+Manual reviews use the same model lock and grading path.
+
+Grades are advisory model assessments from 0–10: 0–2 low concern in the sample,
+3–4 needs checking, 5–6 concerning, 7–8 dangerous, 9–10 critical. Missing evidence
+produces a null score; invalid/truncated output, unknown evidence IDs and grades
+based only on shared identity produce visible review errors, never a fabricated
+score. Exact supplied evidence IDs are required, but citation validation cannot
+verify the truth of the model's interpretation. The small test model is not a
+validated security analyst. Review its reasons against the actual evidence.
+
+GET `/telemetry/reviews` exposes assessments and worker state. GET
+`/telemetry/alerts` exposes persistent alerts and the unread count. At severity 7
+or above a per-pod-UID alert appears on every dashboard page (10-second polling)
+and in the Alerts page. Optional namespace filters affect the page list, while
+the global banner includes every namespace. POST
+`/telemetry/alerts/{uid}/acknowledge` requires the displayed alert `version` and
+returns 409 if it changed. Acknowledgement does not clear the condition. Worsening
+severity or a new flagged action signature reopens an acknowledged alert. Repeated
+observations update it without resetting acknowledgement. A later valid grade
+below threshold marks it inactive; errors or insufficient evidence do not resolve
+an existing alert. Pod replacement uses a new UID, preserving the old alert as
+history. Redis persistence depends on the configured Redis deployment; this local
+Redis container uses AOF. Records expire after the telemetry retention period.
+
+No email, desktop or Slack notifications are sent. The dashboard must be open for
+the human to see notifications; background reviews continue while it is closed.
+Neither the model nor the alert service modifies RBAC or deletes pods.
