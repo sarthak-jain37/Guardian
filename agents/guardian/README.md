@@ -1,5 +1,22 @@
 # Guardian LangGraph module demo
 
+Current phase 1–5 commands and expected results are in [VERIFY.md](VERIFY.md).
+Backend/worker/deployment integration inputs are in [HANDOFF.md](HANDOFF.md).
+The remaining LangGraph-side implementation includes governed backend consumer
+adapters, receipt reconciliation, supplemental pod-context validation and a
+development evaluator/demo. Real backend/executor and lab acceptance remain
+external gates; the existing dashboard still uses the legacy summary path.
+
+```bash
+uv sync --locked --inexact --extra verification
+uv run --no-sync python -m agents.guardian.demo --directory personal_docs/fresh-full-demo
+```
+
+Use a fresh output directory. The demo runs tests, schema checks and local
+recording scenarios; it performs no cluster writes. One real local Qwen v4-prompt
+development case also produced a validated useful two-stage proposal in about
+177 seconds; that is synthetic pilot evidence, not a held-out or lab result.
+
 ## Plan v4 phases 1–3
 
 Phase 2 adds explicit snapshot adoption using `start --intent adopt_baseline`.
@@ -7,28 +24,28 @@ It skips the model and can reach review without usage telemetry or a removal
 candidate. `decide adopt_baseline` authorizes only that exact adoption. The
 recording baseline adapter records a local test request with
 `baseline_activated=false`; it performs no Kubernetes write. Captured exports
-remain previews. Requests use v4; reports and graph/state use v6;
+remain previews. Requests use v5; reports and graph/state use v7;
 proposal/test-decision schemas are v2. See contract decision 0002.
 
 Phase 1 supplies strict contracts and checkpoint compatibility. Phase 2 supplies
 adoption routing, durable context revision requests, expired-review renewal and
 report/readiness publication. Phase 3 adds versioned prompts/profiles, typed model
 results, six scoped evidence tools and a standalone worker. Backend governance
-adapters and real-model/lab integration remain later phases. The personal phase plan stays
+consumer adapters are implemented; actual backend wiring and lab acceptance remain pending. The personal phase plan stays
 in Git-ignored `personal_docs/langgraph-part2-phases.md`.
 
-Requests use `guardian.analysis-request.v4` and bind the optional baseline and
+Requests use `guardian.analysis-request.v5` and bind the optional baseline and
 policy version as well as snapshot/cluster/target UID. Reports use
-`guardian.report.v6` with typed permission facts, readiness and runtime versions.
+`guardian.report.v7` with typed permission facts, readiness and runtime versions.
 The three lifecycle vocabularies are separate; defining their values does not
 implement backend lifecycle persistence. The graph independently validates exports
 from every evidence adapter before analysis.
 
-`schema` exports all seventeen boundary/model/worker schemas from the runtime definitions.
+`schema` exports all twenty boundary/model/worker schemas from the runtime definitions.
 See `contracts/compatibility.json` and
 `contracts/decisions/0003-model-tools-worker.md` for producer/consumer review
 status and wire versions. Shared component acceptance is pending. Production
-decision/verification/recovery/receipt integration belongs to subsequent phases;
+decision/verification/recovery/receipt acceptance still requires the real backend/executor;
 the exported test-decision contract remains simulation-only.
 
 Checkpoints require compatible graph/state/validator/canonicalization/policy

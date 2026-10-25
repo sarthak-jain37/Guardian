@@ -88,6 +88,9 @@ class ModelBoundaryTests(unittest.TestCase):
         result = call_model(model, "investigator", {"oversized": "x" * 2000}, {}, 1)
         self.assertEqual(result.error, "input_too_large")
         self.assertEqual(model.calls, [])
+        # Give the prompt room when isolating the output bound; a larger prompt
+        # must not turn this into a second input-bound check.
+        model.config = ModelConfig(max_input_bytes=16384, max_output_bytes=1024)
         result = call_model(model, "investigator", {}, {}, 1)
         self.assertEqual(result.error, "output_too_large")
         self.assertIsNone(result.response)

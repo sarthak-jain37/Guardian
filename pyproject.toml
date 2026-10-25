@@ -25,6 +25,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+verification = [
+    "jsonschema>=4.26,<5",
+]
 local-model = [
     "llama-cpp-python==0.3.35",
 ]

@@ -19,7 +19,7 @@ class RunVersions(Contract):
     validator_version: Literal["guardian.validator.v2"]
     canonicalization_version: Literal["guardian.sorted-json-sha256.v1"]
     policy_version: ID
-    prompt_version: Literal["guardian.bounded-stages.v2"]
+    prompt_version: Literal["guardian.bounded-stages.v4"]
     model_output_version: Literal["guardian.model-output.v2"]
 
 

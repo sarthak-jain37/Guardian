@@ -16,7 +16,7 @@ from .prompts import PROMPT_VERSION, SCHEMA_VERSION, messages
 
 
 class ModelConfig(Contract):
-    schema_version: Literal["guardian.model-config.v1"] = "guardian.model-config.v1"
+    schema_version: Literal["guardian.model-config.v2"] = "guardian.model-config.v2"
     profile: Literal["test", "dev-laptop", "lab"] = "test"
     profile_version: Literal["guardian.model-profile.v1"] = "guardian.model-profile.v1"
     provider: Literal["scripted", "llama-cpp", "vllm"] = "scripted"
@@ -37,7 +37,7 @@ class ModelConfig(Contract):
     seed: int | None = Field(default=17, strict=True, ge=0)
     threads: int = Field(default=4, strict=True, ge=1, le=64)
     structured_output_mode: Literal["json_schema"] = "json_schema"
-    prompt_version: Literal["guardian.bounded-stages.v2"] = PROMPT_VERSION
+    prompt_version: Literal["guardian.bounded-stages.v4"] = PROMPT_VERSION
     output_schema_version: Literal["guardian.model-output.v2"] = SCHEMA_VERSION
 
     @model_validator(mode="after")
@@ -69,7 +69,7 @@ class ModelConfig(Contract):
 
 
 class ModelResult(Contract):
-    schema_version: Literal["guardian.model-result.v1"] = "guardian.model-result.v1"
+    schema_version: Literal["guardian.model-result.v2"] = "guardian.model-result.v2"
     stage: Literal["investigator", "planner"]
     producer: ID
     config_hash: ID
@@ -77,7 +77,7 @@ class ModelResult(Contract):
     requested_revision: ID | None
     resolved_model: ID | None
     resolved_revision: ID | None
-    prompt_version: Literal["guardian.bounded-stages.v2"] = PROMPT_VERSION
+    prompt_version: Literal["guardian.bounded-stages.v4"] = PROMPT_VERSION
     output_schema_version: Literal["guardian.model-output.v2"] = SCHEMA_VERSION
     profile_version: Literal["guardian.model-profile.v1"] = "guardian.model-profile.v1"
     duration_seconds: float = Field(ge=0)

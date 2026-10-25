@@ -1,17 +1,17 @@
 {
   "schema_version": "guardian.contract-compatibility.v1",
-  "release": "guardian.governance-outcomes.v1",
+  "release": "guardian.validation-handoff.v1",
   "status": "proposed_pending_component_acceptance",
   "source_plan": "Guardian Final Team Architecture and Implementation Plan v4.0",
-  "base_commit": "ca87b8d",
+  "base_commit": "66ad8f2",
   "release_commit": null,
-  "decision_record": "contracts/decisions/0004-governance-outcomes.md",
+  "decision_record": "contracts/decisions/0005-validation-handoff.md",
   "runtime_versions": {
     "graph_version": "guardian.graph.v7",
     "state_version": "guardian.state.v7",
     "validator_version": "guardian.validator.v2",
     "canonicalization_version": "guardian.sorted-json-sha256.v1",
-    "prompt_version": "guardian.bounded-stages.v2",
+    "prompt_version": "guardian.bounded-stages.v4",
     "model_output_version": "guardian.model-output.v2"
   },
   "contracts": [
@@ -122,7 +122,7 @@
     },
     {
       "name": "model_config",
-      "schema_id": "guardian.model-config.v1",
+      "schema_id": "guardian.model-config.v2",
       "producer": "orchestration_model_adapter",
       "consumers": [
         "orchestration_worker"
@@ -131,7 +131,7 @@
     },
     {
       "name": "model_result",
-      "schema_id": "guardian.model-result.v1",
+      "schema_id": "guardian.model-result.v2",
       "producer": "orchestration_model_adapter",
       "consumers": [
         "orchestration_worker"
