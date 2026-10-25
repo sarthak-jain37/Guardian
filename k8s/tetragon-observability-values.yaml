@@ -1,0 +1,8 @@
+tetragon:
+  enableProcessCred: true
+  enableProcessNs: true
+  exportFilename: tetragon.log
+  exportFileMaxSizeMB: 100
+  exportFileMaxBackups: 5
+  # Retain system namespace events too. Review volume before deploying.
+  exportDenyList: ""

@@ -33,3 +33,6 @@ Thumbs.db
 *.log
 
 /personal_docs
+
+# Checked-in telemetry boundary examples
+!k8s/*.example.json

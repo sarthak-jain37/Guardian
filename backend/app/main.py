@@ -1,6 +1,10 @@
 import asyncio
 import logging
 
+from backend.app.services.telemetry import Telemetry
+from backend.app.services.pod_evidence import refresh_inventory
+from backend.app.api.routes.telemetry import router as telemetry_router
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from redis.asyncio import Redis
@@ -25,6 +29,9 @@ async def lifespan(app: FastAPI):
     
     app.state.redis = redis
     app.state.k8s = k8s
+    app.state.telemetry = Telemetry(redis)
+    telemetry_tasks = app.state.telemetry.start()
+    telemetry_tasks.append(asyncio.create_task(refresh_inventory(app.state.telemetry, k8s)))
 
     # Seed dangerous permissions cache on application startup
     try:
@@ -43,6 +50,9 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    for task in telemetry_tasks:
+        task.cancel()
+    await asyncio.gather(*telemetry_tasks, return_exceptions=True)
     worker_task.cancel()
 
     try:
@@ -56,6 +66,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(output_router)
+app.include_router(telemetry_router)
 app.include_router(dangerous_permissions_router)
 
 
