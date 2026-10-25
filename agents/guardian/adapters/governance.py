@@ -95,7 +95,11 @@ class BackendReviewAdapter(BackendGovernanceAdapter):
         value = self._call("project_proposal", proposal_id=proposal_id, status=ProposalStatus(status).value, reason=reason)
         if not isinstance(value, dict) or value.get("proposal_id") != proposal_id:
             raise ValueError("invalid_proposal_projection")
-        return {"proposal_id": proposal_id, "status": ProposalStatus(value.get("status")).value, "reason": value.get("reason")}
+        try:
+            projected = ProposalStatus(value.get("status")).value
+        except Exception:
+            raise ValueError("invalid_proposal_projection") from None
+        return {"proposal_id": proposal_id, "status": projected, "reason": reason}
 
     def get_proposal_decision(self, proposal_id):
         value = self._call("get_proposal_decision", proposal_id=proposal_id)

@@ -350,6 +350,16 @@ class AnalysisReport(Contract):
     trace: list[dict[str, JsonValue]] = Field(max_length=128)
     execution_outcome: ExecutionReceipt | None = None
 
+    @model_validator(mode="after")
+    def outcome_claims(self):
+        from .governance import receipt_status
+        if self.execution_outcome is not None:
+            if self.mode != "governed" or self.status != receipt_status(self.execution_outcome):
+                raise ValueError("report_outcome_status_mismatch")
+        elif self.status in ("VERIFYING", "COMPLETED", "ROLLED_BACK"):
+            raise ValueError("verified_status_requires_backend_receipt")
+        return self
+
 
 class RevisionRequest(Contract):
     schema_version: Literal["guardian.revision-request.v1"] = "guardian.revision-request.v1"

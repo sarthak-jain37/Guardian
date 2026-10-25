@@ -9,7 +9,7 @@ from langgraph.types import Command
 from pydantic import ValidationError
 
 from agents.guardian.adapters.governance import BackendGovernanceAdapter
-from agents.guardian.contracts import AnalysisRequest, Proposal
+from agents.guardian.contracts import AnalysisReport, AnalysisRequest, Proposal
 from agents.guardian.fixtures import demo_evidence
 from agents.guardian.governance import (ExecutionReceipt, GovernedDecision, PREFLIGHT_CHECKS, PreflightResult,
                                        action_key, validate_receipt)
@@ -120,6 +120,38 @@ class GovernanceTests(unittest.TestCase):
         self.decision = self.decision.model_copy(update={"revoked": True})
         self.assertEqual(self.resume()["status"], "STALE")
         self.backend.request.assert_not_called()
+
+    def test_backend_cannot_extend_the_approved_execution_window(self):
+        self.start()
+        self.decision = self.decision.model_copy(update={"execution_expires_at": self.now + timedelta(hours=1)})
+        result = self.resume()
+        self.assertEqual(result["reason"], "execution_window_does_not_match_proposal")
+        self.backend.request.assert_not_called()
+
+    def test_raw_authority_provider_failure_is_redacted_and_blocks_dispatch(self):
+        self.start()
+        def unavailable(_):
+            raise RuntimeError("credential=must-not-leak")
+        self.store.get_decision = unavailable
+        result = self.resume()
+        self.assertEqual(result["reason"], "governance_revalidation_failed")
+        self.assertNotIn("must-not-leak", str(result))
+        self.backend.request.assert_not_called()
+
+    def test_expired_forward_authority_prevents_new_dispatch(self):
+        self.start()
+        self.now += timedelta(seconds=301)
+        result = self.resume()
+        self.assertEqual(result["reason"], "execution_window_expired")
+        self.backend.request.assert_not_called()
+
+    def test_report_cannot_claim_verified_success_without_receipt(self):
+        from agents.guardian.graph import report
+        self.start()
+        output = report(self.state, self.runtime)
+        output["status"] = "COMPLETED"
+        with self.assertRaises(ValidationError):
+            AnalysisReport.model_validate(output)
 
     def test_local_test_decision_cannot_authorize_governed_run(self):
         self.start()

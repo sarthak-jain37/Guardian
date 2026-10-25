@@ -28,7 +28,7 @@ class Runtime:
     model: ModelClient
     review: ReviewPort
     verification: VerificationPort
-    execution: ExecutionPort
+    execution: ExecutionPort | None
     clock: Callable = utc_now
     budget: BudgetPort | None = None
     baseline: BaselinePort | None = None
@@ -342,7 +342,7 @@ def build_graph(runtime: Runtime, checkpointer):
         ready = all(g.result == "pass" for g in gates)
         req = AnalysisRequest.model_validate(state["request"])
         simulation = req.mode == "simulation"
-        if simulation and (e.source_mode != "fixture" or not runtime.execution.simulation_only):
+        if simulation and (e.source_mode != "fixture" or runtime.execution is None or not runtime.execution.simulation_only):
             raise ValueError("simulation cannot use captured evidence or real executor")
         transport = simulation or (req.mode == "governed" and governed_transport(runtime))
         ready = ready and transport
@@ -430,6 +430,8 @@ def build_graph(runtime: Runtime, checkpointer):
                         "trace": event(state, "revalidate", decision_kind=decision.kind)}
             if decision.execution_expires_at is None or now >= decision.execution_expires_at:
                 raise ValueError("execution_window_expired")
+            if decision.execution_expires_at != decision.approved_at + timedelta(seconds=proposal.execution_window_seconds):
+                raise ValueError("execution_window_does_not_match_proposal")
             expected_kind = "adopt_baseline" if proposal.action == "adopt_baseline" else "approve_remediation"
             if decision.kind != expected_kind:
                 raise ValueError("decision_kind_does_not_match_proposal")
@@ -466,7 +468,21 @@ def build_graph(runtime: Runtime, checkpointer):
             return {"status": "EXECUTION_REQUESTED", "reason": None,
                     "trace": event(state, "revalidate", decision_kind=decision.kind, outcome="simulated_authority_valid")}
         except (LookupError, ValueError, TypeError) as exc:
-            return {"status": "STALE", "reason": str(exc)[:300], "trace": event(state, "revalidate", outcome="blocked")}
+            reason = str(exc)[:300]
+            if state["request"]["mode"] == "governed":
+                safe_codes = {"resume_requires_decision_id", "stored_proposal_content_changed", "proposal_no_longer_reviewable",
+                              "invalid_or_revoked_decision", "execution_window_expired", "execution_window_does_not_match_proposal",
+                              "decision_kind_does_not_match_proposal", "material_evidence_changed",
+                              "current_adoption_readiness_failed", "current_readiness_failed", "backend_readiness_failed",
+                              "preflight_scope_mismatch", "preflight_expired_or_future", "backend_preflight_blocked",
+                              "governance_operation_unavailable", "invalid_governance_record"}
+                reason = reason if reason in safe_codes else "governance_revalidation_failed"
+            return {"status": "STALE", "reason": reason, "trace": event(state, "revalidate", outcome="blocked")}
+        except Exception:
+            if state["request"]["mode"] != "governed":
+                raise
+            return {"status": "STALE", "reason": "governance_revalidation_failed",
+                    "trace": event(state, "revalidate", outcome="blocked")}
 
     def request_execution(state):
         if state["request"]["mode"] == "governed":
@@ -529,7 +545,7 @@ def build_graph(runtime: Runtime, checkpointer):
         if state.get("proposal"):
             runtime.review.publish(Proposal.model_validate(state["proposal"]), report(state, runtime))
             status = {"REJECTED": "REJECTED", "EXECUTION_REQUESTED": "APPROVED", "BLOCKED": "BLOCKED"}.get(state["status"])
-            if state.get("execution_outcome"):
+            if state.get("preflight"):
                 status = "APPROVED"
             if state["status"] == "STALE":
                 status = "EXPIRED" if state.get("reason") == "execution_window_expired" else "SUPERSEDED"
