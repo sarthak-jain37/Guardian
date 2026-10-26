@@ -161,3 +161,28 @@ Evidence is bounded by the existing retention and event limits. Historical
 permissions at the exact request time, full syscall coverage, complete CPU/memory
 usage and lossless ingestion are not claimed. RBAC collection errors appear in
 collector status; previous snapshots can remain visible with their timestamps.
+
+
+## Pod workspaces and interactive connections
+
+The frontend now separates Overview, Connections, Pod workspace, Permissions,
+Evidence and LLM review. Pod capabilities are explained in plain language with
+binding provenance, rather than presenting a severity per RBAC rule. The graph
+supports drag, zoom, an inspector and observation replay; it does not animate
+individual live packets. The vendored vis-network build and its license are
+included under frontend/assets.
+
+Selected-pod review uses GET /telemetry/pods/{namespace}/{pod}/review-context
+and POST /telemetry/pods/{namespace}/{pod}/review. The POST body contains
+question and event_limit. Distinct evidence channels are sampled, shared service
+account events stay separate, and context overflow returns a 413 response.
+Model answers are advisory; missing evidence citations and output truncation
+are surfaced. The model uses its GGUF chat template and serialized inference.
+LLM_CONTEXT_SIZE, LLM_MAX_TOKENS and LLM_THREADS configure local resource use.
+
+Minikube testing uses a dedicated guardian-e2e Docker profile and audit mount.
+The API server must mount its audit file directory onto the node for export.
+The Kubernetes client explicitly honors KUBECONFIG set through dotenv. The
+frontend requires Streamlit 1.63 or newer. llama-cpp-python is now declared as
+an application dependency; CPU wheels may be installed from the upstream
+project's wheel index when a local source build is unsuitable.

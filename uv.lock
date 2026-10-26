@@ -996,6 +996,7 @@ dependencies = [
     { name = "langchain-text-splitters" },
     { name = "langgraph" },
     { name = "langgraph-checkpoint-sqlite" },
+    { name = "llama-cpp-python" },
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
@@ -1026,12 +1027,13 @@ requires-dist = [
     { name = "langchain-text-splitters", specifier = ">=1.1.2" },
     { name = "langgraph", specifier = "==1.2.11" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=3,<5" },
-    { name = "llama-cpp-python", marker = "extra == 'local-model'", specifier = "==0.3.35" },
+    { name = "llama-cpp-python", specifier = ">=0.3.36" },
+    { name = "llama-cpp-python", marker = "extra == 'local-model'", specifier = "==0.3.36" },
     { name = "pydantic", specifier = ">=2.13.5,<3" },
     { name = "python-dotenv", specifier = ">=1.2.3" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "redis", specifier = ">=8.1.0" },
-    { name = "streamlit", specifier = ">=1.62.0" },
+    { name = "streamlit", specifier = ">=1.63.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.52.4" },
 ]
 provides-extras = ["verification", "local-model"]
@@ -1606,7 +1608,7 @@ wheels = [
 
 [[package]]
 name = "llama-cpp-python"
-version = "0.3.35"
+version = "0.3.36"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "diskcache" },
@@ -1615,7 +1617,7 @@ dependencies = [
     { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1a/71/5ecdad726b87527b361d9d95313c6591f27bb3fad79c9ab524ad4250b4c9/llama_cpp_python-0.3.35.tar.gz", hash = "sha256:1139dbb54509074b70893fab8554e3b079aa9f4d312058ce4018ef0019e3de12", size = 74868054, upload-time = "2026-08-17T09:41:34.939Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ec/e9/e7de2b0463ea3ffbf0ede6cb21b58c1258a8f6521aae45ca773a59fe7cf3/llama_cpp_python-0.3.36.tar.gz", hash = "sha256:832db0699007f1be95a7e41ef12e88926b02ba836461e36a36372db2760c1a2e", size = 76589250, upload-time = "2026-10-01T05:48:01.345Z" }
 
 [[package]]
 name = "markupsafe"

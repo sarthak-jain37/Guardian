@@ -18,7 +18,8 @@ dependencies = [
     "langchain-openai>=1.6.0",
     "langchain-text-splitters>=1.1.2",
     "langchain-community>=0.4.2",
-    "streamlit>=1.62.0",
+    "streamlit>=1.63.0",
+    "llama-cpp-python>=0.3.36",
     "langgraph==1.2.11",
     "langgraph-checkpoint-sqlite>=3,<5",
     "pydantic>=2.13.5,<3",
@@ -29,5 +30,5 @@ verification = [
     "jsonschema>=4.26,<5",
 ]
 local-model = [
-    "llama-cpp-python==0.3.35",
+    "llama-cpp-python==0.3.36",
 ]

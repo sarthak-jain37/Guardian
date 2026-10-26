@@ -1,240 +1,288 @@
-import sys
+import html
+import json
 from pathlib import Path
+import sys
+from collections import Counter
+from datetime import datetime
+from urllib.parse import quote, urlencode
 
-# Ensure project root is in sys.path so 'backend' imports work seamlessly
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-import streamlit as st
+sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
 import requests
+import streamlit as st
 from backend.app.core.config import BACKEND_URL
+from backend.app.services.pod_review import permission_points, event_summary, SIGNALS
+from frontend.graph_view import render_graph
+
+st.set_page_config(page_title='Guardian · Cluster observability',page_icon='🛡️',layout='wide',initial_sidebar_state='collapsed')
+st.markdown('''<style>
+.block-container{max-width:1480px;padding-top:2rem;padding-bottom:3rem}h1{font-size:2.1rem!important;letter-spacing:-.04em}h2{font-size:1.35rem!important;letter-spacing:-.02em}h3{font-size:1.1rem!important}.brand{font-size:12px;font-weight:650;letter-spacing:.16em;color:#7d9bb8;margin-bottom:12px}.muted{color:#8fa7bf}.pod-title{font-size:22px;font-weight:600;letter-spacing:-.025em}.eyebrow{font-size:11px;letter-spacing:.13em;color:#8ea7c0;text-transform:uppercase}.chip{display:inline-block;padding:4px 10px;border-radius:20px;background:rgba(85,169,144,.14);color:#72d7b8;font-size:12px;margin-right:5px}.chip.warn{background:rgba(224,168,84,.13);color:#e8bc77}[data-testid="stMetric"]{border:1px solid rgba(125,155,184,.2);border-radius:12px;padding:16px 19px;background:rgba(125,155,184,.035)}[data-testid="stMetricValue"]{font-size:1.8rem}div[data-testid="stVerticalBlockBorderWrapper"]>div{border-color:rgba(125,155,184,.2)}.stButton>button{border-radius:8px}[data-testid="stHeader"]{background:transparent}a{text-decoration:none}
+</style>''',unsafe_allow_html=True)
 
 
-st.set_page_config(
-    page_title="RBAC Drift Guardian",
-    page_icon="🛡️",
-    layout="wide",
-)
-
-st.title("Kubernetes RBAC Drift Guardian")
+@st.cache_data(ttl=5,show_spinner=False)
+def fetch(path,params=None):
+    response=requests.get(BACKEND_URL+path,params=params,timeout=25)
+    response.raise_for_status()
+    return response.json()
 
 
-def get_dangerous_permissions():
-    try:
-        response = requests.get(
-            f"{BACKEND_URL}/dangerous-permissions",
-            timeout=5,
-        )
-        response.raise_for_status()
-        return response.json().get("findings", [])
-    except requests.RequestException as error:
-        st.error(f"Failed to fetch dangerous permissions from backend: {error}")
-        return []
+def api(path,params=None):
+    try:return fetch(path,params)
+    except (requests.RequestException,ValueError) as exc:
+        st.error(f'Could not load cluster data: {exc}')
+        st.caption('Check the backend and collector health, then refresh this page.')
+        st.stop()
 
 
-def get_events():
-    try:
-        response = requests.get(
-            f"{BACKEND_URL}/outputs",
-            timeout=5,
-        )
-        response.raise_for_status()
-        return response.json().get("events", [])
-    except requests.RequestException as error:
-        st.error(f"Backend connection failed: {error}")
-        return []
+def ns_params(**extra):
+    return {**({'namespace':namespace} if namespace else {}),**extra}
 
 
-def render_diff(diff):
-    for category, changes in diff.items():
-        if not changes:
-            continue
-
-        is_added = "added" in category
-        is_removed = "removed" in category
-        title = category.replace("_", " ").title()
-
-        if is_added:
-            st.success(f"🟢 {title}")
-        elif is_removed:
-            st.error(f"🔴 {title}")
-        else:
-            st.warning(title)
-
-        st.json(changes)
+def timestamp(value):
+    try:return datetime.fromisoformat(str(value).replace('Z','+00:00')).astimezone().strftime('%d %b %H:%M:%S')
+    except (TypeError,ValueError):return value or 'Not reported'
 
 
-st.header("⚠️ Dangerous Permissions Detection")
-st.caption(
-    "Live cluster audit of Roles & ClusterRoles for privilege escalation risks "
-    "(dangerous verbs like bind/impersonate/escalate, wildcards, and sensitive resources)."
-)
-
-dangerous_perms = get_dangerous_permissions()
-
-if not dangerous_perms:
-    st.success("✅ No dangerous permissions detected in the cluster.")
-else:
-    crit_count = sum(1 for r in dangerous_perms if r.get("severity") == "CRITICAL")
-    high_count = sum(1 for r in dangerous_perms if r.get("severity") == "HIGH")
-    med_count = sum(1 for r in dangerous_perms if r.get("severity") == "MEDIUM")
-
-    metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
-    metric_col1.metric("Flagged Roles", len(dangerous_perms))
-    metric_col2.metric("Critical Risks", crit_count)
-    metric_col3.metric("High Risks", high_count)
-    metric_col4.metric("Medium Risks", med_count)
-
-    st.write("")
-
-    for role in dangerous_perms:
-        sev = role.get("severity", "LOW")
-        icon = "🚨" if sev == "CRITICAL" else ("⚠️" if sev == "HIGH" else "ℹ️")
-        expander_label = (
-            f"{icon} [{sev}] {role.get('role_kind')}: {role.get('role_name')} "
-            f"(Namespace: {role.get('namespace')})"
-        )
-
-        with st.expander(expander_label, expanded=(sev == "CRITICAL")):
-            flags_tags = " ".join([f"`{flag}`" for flag in role.get("flags", [])])
-            st.markdown(f"**Identified Risks:** {flags_tags}")
-
-            for rule in role.get("rules", []):
-                rule_num = rule.get("rule_index", 0) + 1
-                st.markdown(f"**Rule #{rule_num}** (Severity: `{rule.get('severity')}`)")
-
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    st.markdown(f"**Verbs:** `{rule.get('verbs')}`")
-                with c2:
-                    st.markdown(f"**Resources:** `{rule.get('resources')}`")
-                with c3:
-                    st.markdown(f"**API Groups:** `{rule.get('api_groups')}`")
-
-                for finding in rule.get("findings", []):
-                    if rule.get("severity") == "CRITICAL":
-                        st.error(f"• {finding}")
-                    else:
-                        st.warning(f"• {finding}")
-
-                st.markdown("---")
+def go_pod(pod):
+    st.session_state['selected_pod']=(pod['namespace'],pod['pod'])
+    if st.session_state.get('workspace_pod_picker') != (pod['namespace'],pod['pod']):
+        st.session_state['workspace_pod_picker']=(pod['namespace'],pod['pod'])
+    st.switch_page(pod_page,query_params={'namespace':pod['namespace'],'pod':pod['pod']})
 
 
-st.divider()
+def active_pod():
+    choices={(p['namespace'],p['pod']):p for p in all_pods}
+    requested=(st.query_params.get('namespace',''),st.query_params.get('pod',''))
+    if requested in choices:st.session_state['selected_pod']=requested
+    current=st.session_state.get('selected_pod')
+    if current not in choices:
+        visible=[p for p in all_pods if not namespace or p['namespace']==namespace]
+        if not visible:
+            st.info('No pods are available for this namespace. Check inventory collection.');st.stop()
+        current=(visible[0]['namespace'],visible[0]['pod'])
+    keys=list(choices)
+    chosen=st.selectbox('Select a pod',keys,index=keys.index(current),format_func=lambda k:k[0]+'/'+k[1],key='workspace_pod_picker')
+    st.session_state['selected_pod']=chosen
+    return choices[chosen]
 
 
-st.header("🔄 RBAC Drift Events")
+def event_table(events,key):
+    if not events:
+        st.info('No matching observations in the retained sample.');return
+    rows=[{'When':timestamp(e.get('timestamp') or e.get('observed_at')),'Pod':e.get('source_pod',{}).get('pod') or 'Shared identity','Activity':event_summary(e),'Source':e.get('source',''),'Result':e.get('outcome') or e.get('verdict') or '', 'Evidence ID':e['id'][:12]} for e in events]
+    st.dataframe(rows,hide_index=True,width='stretch')
+    with st.expander('Inspect an observation'):
+        chosen=st.selectbox('Observation',list(range(len(events))),format_func=lambda i:rows[i]['When']+' · '+rows[i]['Activity'],key=key+'_event')
+        event=events[chosen]
+        st.caption('Evidence ID: '+event['id'])
+        for flag in event.get('findings',[]):st.write('• '+SIGNALS.get(flag,flag.replace('_',' ').capitalize()))
+        st.json(event,expanded=False)
 
-events = get_events()
 
-if not events:
-    st.info("No RBAC drift events detected yet.")
-else:
-    if "current_index" not in st.session_state:
-        st.session_state.current_index = 0
+def permission_view(identity):
+    points=permission_points(identity)
+    if points:
+        st.subheader('What this pod can do')
+        for point in points[:12]:
+            scope='across the cluster' if point['scope']=='*' else 'in '+str(point['scope'])
+            restriction=(' · named resources: '+', '.join(point['resource_names'])) if point['resource_names'] else ''
+            st.write('• '+point['summary']+' '+scope+restriction)
+        if len(points)>12:st.caption(f'{len(points)-12} additional capabilities are listed below.')
+        st.dataframe([{'Capability':p['summary'],'Scope':'Cluster-wide' if p['scope']=='*' else p['scope'],'Granted by':str(p['binding_kind'])+'/'+str(p['binding']),'Role':p['role'],'Named resources':', '.join(p['resource_names']) or 'Not restricted by name'} for p in points],hide_index=True,width='stretch')
+    else:st.info('No workload-control or credential-access capabilities were identified in the current RBAC snapshot.')
+    permissions=identity.get('permissions',{})
+    st.caption('Identity: '+permissions.get('service_account','Unknown')+' · Permissions describe what may be requested, not proof of misuse.')
+    if permissions.get('unresolved_bindings'):st.warning('Some bindings could not be resolved. This permission view is incomplete.')
+    with st.expander('All granted access and binding provenance'):
+        rows=[]
+        for grant in permissions.get('grants',[]):
+            rule=grant.get('rule',{})
+            rows.append({'Actions':', '.join(rule.get('verbs',[])),'Resources':', '.join(rule.get('resources') or rule.get('nonResourceURLs',[])),'API groups':', '.join(rule.get('apiGroups',[])) or 'core','Scope':grant.get('scope'),'Role':grant.get('role_name'),'Binding':grant.get('binding_name')})
+        st.dataframe(rows,hide_index=True,width='stretch')
 
-    # Ensure index remains within bounds
-    if st.session_state.current_index >= len(events):
-        st.session_state.current_index = len(events) - 1
 
-    left, middle, right = st.columns([1, 2, 1])
+def review_panel(identity):
+    ns,pod=identity['namespace'],identity['pod']
+    path='/telemetry/pods/'+quote(ns,safe='')+'/'+quote(pod,safe='')
+    st.subheader('Review this pod with the local model')
+    st.write('Ask about this pod’s behavior. The review combines its permissions, distinct observed actions, configured boundaries and collection gaps.')
+    question=st.text_area('What do you want to understand?',value='Assess whether this pod needs investigation. Explain what the evidence proves and what remains uncertain.',height=90,key='question_'+ns+'/'+pod)
+    count=st.select_slider('Evidence records to sample',options=[3,5,8,12,20,30],value=8,key='review_limit_'+ns+'/'+pod)
+    context=api(path+'/review-context',{'limit':count})
+    sample=context.get('sample',{})
+    a,b,c=st.columns(3);a.metric('Selected observations',sample.get('selected',0));b.metric('Retained pod observations',sample.get('retained_attributed_events',0));c.metric('Shared-identity observations',sample.get('shared_identity_events',0))
+    st.caption('Distinct actions are sampled so repeated network records do not hide process or API evidence. Shared-identity activity remains separate.')
+    with st.expander('Evidence that will be sent to the model'):
+        st.dataframe([{'ID':e['id'][:12],'Activity':e['description'],'Source':e['source'],'When':timestamp(e.get('timestamp'))} for e in context.get('events',[])],hide_index=True,width='stretch')
+        st.download_button('Download review evidence',json.dumps(context,indent=2),file_name=pod+'-review-evidence.json',mime='application/json')
+    if st.button('Analyze '+pod,type='primary',key='analyze_'+ns+'/'+pod):
+        try:
+            with st.spinner('Reviewing this pod’s evidence locally. CPU inference can take a minute...'):
+                response=requests.post(BACKEND_URL+path+'/review',json={'question':question,'event_limit':count},timeout=300)
+            if not response.ok:
+                try:message=response.json().get('detail',response.text)
+                except ValueError:message=response.text
+                st.error(str(message))
+            else:st.session_state['review_'+ns+'/'+pod]=response.json()
+        except requests.RequestException as exc:st.error('The local model did not complete: '+str(exc))
+    result=st.session_state.get('review_'+ns+'/'+pod)
+    if result:
+        st.subheader('Model interpretation')
+        st.caption('Reviewed '+timestamp(result.get('reviewed_at'))+' · '+str(len(result.get('event_ids',[])))+' evidence IDs · local advisory analysis')
+        analysis=result.get('analysis','')
+        supplied=result.get('event_ids',[])
+        cited=[event_id for event_id in supplied if event_id in analysis or event_id[:12] in analysis]
+        if supplied and not cited:
+            st.warning('The model did not cite the supplied evidence IDs. Treat these claims as unverified and compare them with the observations below.')
+        # Render model text without remote image embeds or executable HTML.
+        import re
+        analysis=re.sub(r'!\[[^\]]*\]\([^)]*\)','[image omitted]',analysis)
+        st.markdown(analysis)
+        with st.expander('Supporting evidence IDs'):st.write(result.get('event_ids',[]))
+        st.caption('Check the cited evidence before acting. Model interpretation does not establish compromise.')
 
+
+def overview():
+    st.title('Your cluster at a glance')
+    st.write('Understand what workloads can do, what they have done, and where the evidence needs attention.')
+    events=api('/telemetry/events',ns_params(limit=1000))['events']
+    visible=[p for p in all_pods if not namespace or p['namespace']==namespace]
+    flagged=[e for e in events if e.get('findings')]
+    a,b,c,d=st.columns(4)
+    a.metric('Pods',len(visible));b.metric('Network flows',sum(e['kind']=='network' for e in events));c.metric('API actions',sum(e['kind']=='kubernetes_audit' for e in events));d.metric('Flagged events',len(flagged))
+    st.caption('Activity counts describe the latest 1,000 retained records in the selected namespace. They are not risk scores.')
+    left,right=st.columns([1.5,1])
     with left:
-        if st.button(
-            "⬅ Previous",
-            disabled=(st.session_state.current_index == 0),
-            use_container_width=True,
-        ):
-            st.session_state.current_index -= 1
-            st.rerun()
-
-    with middle:
-        st.markdown(
-            f"""
-            <div style="text-align:center;">
-                <h4>
-                    Drift Event
-                    {st.session_state.current_index + 1}
-                    of
-                    {len(events)}
-                </h4>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
+        st.subheader('Workloads to inspect')
+        pod_counts=Counter((e.get('source_pod',{}).get('namespace'),e.get('source_pod',{}).get('pod')) for e in flagged)
+        ordered=sorted(visible,key=lambda p:pod_counts[(p['namespace'],p['pod'])],reverse=True)
+        for pod in ordered[:8]:
+            with st.container(border=True):
+                name,action=st.columns([2,1])
+                name.markdown('**'+pod['pod']+'**')
+                name.caption(pod['namespace']+' · '+str(pod.get('phase') or 'Unknown')+' · '+str(pod_counts[(pod['namespace'],pod['pod'])])+' flagged observations')
+                if action.button('Open pod',key='open_'+pod['namespace']+'/'+pod['pod']):go_pod(pod)
     with right:
-        if st.button(
-            "Next ➡",
-            disabled=(st.session_state.current_index == len(events) - 1),
-            use_container_width=True,
-        ):
-            st.session_state.current_index += 1
-            st.rerun()
+        st.subheader('What needs attention')
+        counts=Counter(f for e in flagged for f in e.get('findings',[]))
+        for flag,count in counts.most_common(7):
+            st.write('**'+str(count)+' observations** · '+SIGNALS.get(flag,flag.replace('_',' ').capitalize()))
+        if not counts:st.info('No flags in this sample. Check collection coverage before drawing a conclusion.')
+        st.subheader('Collection coverage')
+        for source,state in status.get('collectors',{}).items():
+            state_name=state.get('state','unknown')
+            st.write(('🟢 ' if state_name in ('ready','following') else '🟠 ')+source.title()+' · '+state_name)
+            if state.get('error'):st.caption(state['error'])
+        st.caption('Inventory snapshot: '+timestamp(inventory.get('observed_at')))
 
-    current_event = events[st.session_state.current_index]
 
-    st.caption(f"Detected: {current_event.get('timestamp', 'Unknown')}")
+def connections():
+    st.title('Pod connections')
+    st.write('Explore observed communication. Select a node or link for details; open a pod workspace directly from the graph.')
+    controls=st.columns([1,2])
+    limit=controls[0].selectbox('Network sample', [500,1000,2500,5000],index=1)
+    live=controls[1].toggle('Refresh every 10 seconds',value=False)
+    @st.fragment(run_every='10s' if live else None)
+    def graph_fragment():
+        graph=api('/telemetry/graph',ns_params(limit=limit))
+        a,b,c=st.columns(3);a.metric('Endpoints',len(graph['nodes']));b.metric('Directed links',len(graph['edges']));c.metric('Drop observations',sum(e['drops'] for e in graph['edges']))
+        render_graph(graph)
+    graph_fragment()
 
-    diff_col, llm_col = st.columns(2)
 
-    with diff_col:
-        st.subheader("🔐 RBAC Diff")
-        render_diff(current_event.get("diff", {}))
+def pod_workspace():
+    identity=active_pod();ns,pod=identity['namespace'],identity['pod']
+    st.caption('POD WORKSPACE / '+ns)
+    st.title(pod)
+    a,b,c,d=st.columns(4)
+    a.metric('Phase',identity.get('phase') or 'Unknown');b.metric('Containers',len(identity.get('containers',[])));c.metric('Restarts',sum(c.get('restartCount',0) for c in identity.get('container_statuses',[])));d.metric('Node',identity.get('node') or 'Not assigned')
+    st.caption('Service account: '+identity.get('service_account_name','default')+' · Pod UID: '+str(identity.get('uid')))
+    path='/telemetry/pods/'+quote(ns,safe='')+'/'+quote(pod,safe='')
+    evidence=api(path+'/evidence',{'limit':500})
+    records=evidence.get('pods',[])
+    record=records[0] if records else {'events':[],'shared_identity_audit_events':[]}
+    events=record.get('events',[])
+    tabs=st.tabs(['Summary','Connections','Permissions','Runtime and files','Kubernetes actions','HTTP and DNS','Configuration','LLM review'])
+    with tabs[0]:
+        st.subheader('Observed behavior that needs attention')
+        flags=Counter(f for event in events for f in event.get('findings',[]))
+        for flag,count in flags.most_common(12):st.write('• '+SIGNALS.get(flag,flag.replace('_',' ').capitalize())+' — '+str(count)+' observations')
+        if not flags:st.info('No flags in this retained sample. This is not a statement that the pod is safe.')
+        st.subheader('Recent activity');event_table(events[:20],'pod_summary')
+        shared=record.get('shared_identity_audit_events',[])
+        if shared:st.warning(str(len(shared))+' sampled audit events use the same service account but cannot be confidently attributed to this pod.')
+    with tabs[1]:render_graph(api('/telemetry/graph',{'namespace':ns,'limit':2500}),focus=(ns,pod))
+    with tabs[2]:permission_view(identity)
+    with tabs[3]:event_table([e for e in events if e['kind'].startswith('process_')],'runtime')
+    with tabs[4]:
+        st.subheader('Actions attributed to this pod’s credentials');event_table([e for e in events if e['kind']=='kubernetes_audit'],'api_actions')
+        with st.expander('Shared service-account activity with uncertain pod attribution'):event_table(record.get('shared_identity_audit_events',[]),'shared_api')
+    with tabs[5]:event_table([e for e in events if e.get('http') or e.get('dns')],'http_dns')
+    with tabs[6]:
+        st.subheader('Container configuration')
+        for container in identity.get('containers',[]):
+            st.write('**'+container['name']+'** · '+str(container.get('image')))
+            security=container.get('security_context') or {}
+            st.write('• Privileged: '+str(security.get('privileged',False))+' · Privilege escalation: '+str(security.get('allowPrivilegeEscalation','not specified')))
+            st.write('• Run as user: '+str(security.get('runAsUser',(identity.get('security_context') or {}).get('runAsUser','image default'))))
+            st.json({'security_context':security,'resources':container.get('resources',{}),'mounts':container.get('volume_mounts',[])},expanded=False)
+        st.write('Host access: network '+str(identity.get('host_network'))+' · PID '+str(identity.get('host_pid'))+' · IPC '+str(identity.get('host_ipc')))
+        st.subheader('Configuration and status changes');event_table([e for e in events if e['kind']=='pod_configuration_change'],'config')
+        st.download_button('Download complete pod evidence',json.dumps(evidence,indent=2),file_name=pod+'-evidence.json',mime='application/json')
+    with tabs[7]:review_panel(identity)
 
-    with llm_col:
-        st.subheader("LLM Analysis")
-        st.markdown(
-            current_event.get("llm_response", "No LLM analysis available.")
-        )
-st.divider()
-st.header("Pod activity and runtime monitoring")
-try:
-    telemetry_status = requests.get(f"{BACKEND_URL}/telemetry/status", timeout=5)
-    telemetry_status.raise_for_status()
-    st.json(telemetry_status.json())
-    selected_namespace = st.text_input("Telemetry namespace (empty for all)")
-    params = {"limit": 500}
-    if selected_namespace:
-        params["namespace"] = selected_namespace
-    graph_response = requests.get(f"{BACKEND_URL}/telemetry/graph", params=params, timeout=10)
-    graph_response.raise_for_status()
-    graph = graph_response.json()
-    import json
-    dot = ["digraph pods {"]
-    for node in graph["nodes"]:
-        dot.append(f'{json.dumps(node["id"])} [label={json.dumps(node.get("namespace", "") + "/" + (node.get("pod") or node.get("ip", "unknown")))}];')
-    for edge in graph["edges"]:
-        label = f'{edge["flow_records"]} flows / {edge["http_requests"]} HTTP / {edge["drops"]} drops'
-        dot.append(f'{json.dumps(edge["source"])} -> {json.dumps(edge["target"])} [label={json.dumps(label)}];')
-    st.graphviz_chart("\n".join(dot + ["}"]))
-    records_response = requests.get(f"{BACKEND_URL}/telemetry/events", params=params, timeout=10)
-    records_response.raise_for_status()
-    records = records_response.json()["events"]
-    st.caption("Recent observed events; collection gaps and encrypted traffic limit coverage.")
-    st.dataframe(records, use_container_width=True)
-    if st.button("Evaluate recent activity with local LLM"):
-        with st.spinner("Evaluating activity against configured boundaries..."):
-            evaluation = requests.post(f"{BACKEND_URL}/telemetry/evaluate", params={**params, "limit": 50}, timeout=180)
-            evaluation.raise_for_status()
-            st.write(evaluation.json()["analysis"])
-except requests.RequestException as error:
-    st.warning(f"Telemetry backend unavailable: {error}")
 
-st.subheader("Pod evidence and permissions")
-try:
-    inventory_response = requests.get(f"{BACKEND_URL}/telemetry/pods", timeout=10)
-    inventory_response.raise_for_status()
-    inventory = inventory_response.json()
-    identities = {(p["namespace"], p["pod"]): p for p in inventory.get("pods", [])}
-    st.caption(f'Inventory observed at: {inventory.get("observed_at") or "not collected"}')
-    if identities:
-        selected = st.selectbox("Inspect a pod", list(identities), format_func=lambda p: "/".join(p))
-        with st.expander("Pod configuration and service-account grants"):
-            st.json(identities[selected])
-        evidence_response = requests.get(f"{BACKEND_URL}/telemetry/pods/{selected[0]}/{selected[1]}/evidence", timeout=15)
-        evidence_response.raise_for_status()
-        st.json(evidence_response.json())
-    else:
-        st.info("No pod inventory available. Check inventory collector status and read permissions.")
-except requests.RequestException as error:
-    st.warning(f"Pod evidence unavailable: {error}")
+def permissions_page():
+    st.title('Pod permissions')
+    st.write('See the actions each workload identity can request, the namespace it can affect, and the binding that grants access.')
+    identity=active_pod();permission_view(identity)
+    if st.button('Open full pod workspace',type='primary'):go_pod(identity)
+    with st.expander('RBAC changes across the cluster'):
+        drift=api('/outputs/').get('events',[])
+        if not drift:st.info('No RBAC drift events have been recorded.')
+        for event in drift[-10:]:
+            st.write('**'+timestamp(event.get('timestamp'))+'**')
+            st.json(event.get('diff'),expanded=False)
+            if event.get('llm_response'):st.write(event['llm_response'])
+
+
+def evidence_page():
+    st.title('Evidence explorer')
+    st.write('Inspect the recorded facts behind a finding. Each observation keeps its source, time and evidence ID.')
+    a,b,c=st.columns([2,1,1])
+    kind=a.selectbox('Activity type',{'All activity':'','Network':'network','Kubernetes API':'kubernetes_audit','Process execution':'process_exec','Process exit':'process_exit','Kernel operations':'process_kprobe','Configuration changes':'pod_configuration_change'})
+    mapping={'All activity':'','Network':'network','Kubernetes API':'kubernetes_audit','Process execution':'process_exec','Process exit':'process_exit','Kernel operations':'process_kprobe','Configuration changes':'pod_configuration_change'}
+    limit=b.selectbox('Record limit',[100,500,1000],index=1)
+    flagged=c.toggle('Flagged observations only',False)
+    params=ns_params(limit=limit)
+    if mapping[kind]:params['kind']=mapping[kind]
+    events=api('/telemetry/events',params)['events']
+    if flagged:events=[e for e in events if e.get('findings')]
+    event_table(events,'explorer')
+
+
+def llm_page():
+    st.title('Pod reasoning')
+    identity=active_pod();review_panel(identity)
+
+
+st.markdown('<div class="brand">GUARDIAN / CLUSTER OBSERVABILITY</div>',unsafe_allow_html=True)
+status=api('/telemetry/status');inventory=api('/telemetry/pods');all_pods=inventory.get('pods',[])
+bar1,bar2,bar3=st.columns([2,2,1])
+bar1.caption('CONNECTED CLUSTER');bar1.write('**'+status.get('cluster','Unknown')+'**')
+namespaces=['All namespaces']+sorted({p['namespace'] for p in all_pods})
+default_index=namespaces.index('guardian-demo') if 'guardian-demo' in namespaces else 0
+chosen_namespace=bar2.selectbox('Namespace',namespaces,index=default_index,key='global_namespace')
+namespace=None if chosen_namespace=='All namespaces' else chosen_namespace
+if bar3.button('Refresh data',width='stretch'):st.cache_data.clear();st.rerun()
+nav_pages=[st.Page(overview,title='Overview',url_path='overview',default=True),st.Page(connections,title='Connections',url_path='connections')]
+pod_page=st.Page(pod_workspace,title='Pod workspace',url_path='pod')
+nav_pages.extend([pod_page,st.Page(permissions_page,title='Permissions',url_path='permissions'),st.Page(evidence_page,title='Evidence',url_path='evidence'),st.Page(llm_page,title='LLM review',url_path='review')])
+current_page=st.navigation(nav_pages,position='hidden')
+links=[]
+for item in nav_pages:
+    href='/' if item.title=='Overview' else '/'+item.url_path
+    selected=' class="active"' if item.title==current_page.title else ''
+    links.append('<a href="'+href+'" target="_self"'+selected+'>'+html.escape(item.title)+'</a>')
+st.markdown('<style>.guardian-nav{display:flex;gap:6px;flex-wrap:wrap;padding:12px 0 18px;border-bottom:1px solid #24344c;margin-bottom:22px}.guardian-nav a{color:#a9bdd2!important;padding:9px 12px;border-radius:7px;font-size:14px;text-decoration:none}.guardian-nav a:hover{background:#17283c}.guardian-nav a.active{background:#203a56;color:#eaf4ff!important;font-weight:600}</style><nav class="guardian-nav" aria-label="Guardian features">'+''.join(links)+'</nav>',unsafe_allow_html=True)
+current_page.run()

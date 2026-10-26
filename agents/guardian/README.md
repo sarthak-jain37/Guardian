@@ -76,7 +76,8 @@ CPU tests need no model or GPU:
 uv run --no-sync python -m unittest discover -s tests/orchestrator -v
 ```
 
-For real local inference, install the optional runtime and configure a GGUF file:
+The shared backend installs llama.cpp >=0.3.36. For local inference, use the
+`local-model` extra to pin 0.3.36 and configure a GGUF file:
 
 ```bash
 uv sync --inexact --extra local-model

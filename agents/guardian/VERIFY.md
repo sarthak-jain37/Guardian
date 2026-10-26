@@ -14,8 +14,9 @@ git status --short
 uv sync --locked --inexact --extra verification
 ```
 
-Current branch: `feat/langgraph_part2`. Use Python >=3.11. `--inexact` preserves an
-already-installed optional model runtime. Do not overwrite the existing `.env`.
+Current branch: `feat/langgraph_part2`. Use Python >=3.11. The shared backend now
+requires llama.cpp >=0.3.36; the `local-model` extra pins the same 0.3.36 runtime.
+Its first installation may compile native code. Do not overwrite the existing `.env`.
 The CPU demo needs no Redis, Kubernetes, Docker, GPU or GGUF file.
 
 Old phase-1–3 directories remain historical. Graph/state/report are now v7,
@@ -30,7 +31,7 @@ GUARDIAN_RUN=$(mktemp -d "$PWD/personal_docs/all-phases-XXXXXXXX")
 echo "$GUARDIAN_RUN"
 ```
 
-Expected: **149 tests pass**, **20 schemas validate**, and `passed: true` in
+Expected: **163 tests pass**, **20 schemas validate**, and `passed: true` in
 `demo-summary.json`. Allow about half a minute on the current laptop. All command
 steps use separate processes; inference is explicitly scripted. The demo checks:
 
@@ -82,7 +83,7 @@ starting it; that would make the directory nonempty.
 .venv/bin/python -m unittest discover -s tests/orchestrator -v
 ```
 
-Expected: 149 repository tests / 118 orchestration tests, ending in `OK`.
+Expected: 163 repository tests / 118 orchestration tests, ending in `OK`.
 
 Focused groups:
 
