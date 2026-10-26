@@ -10,6 +10,7 @@ from backend.app.services.redis_service import DANGEROUS_PERMS_KEY
 
 class TestDangerousPermissionsAPI(unittest.TestCase):
 
+    # Fixture: Sets up isolated FastAPI application with mocked Redis client for fast in-memory execution.
     def setUp(self):
         self.app = FastAPI()
         self.app.include_router(dangerous_permissions_router)
@@ -17,6 +18,7 @@ class TestDangerousPermissionsAPI(unittest.TestCase):
         self.app.state.redis = self.mock_redis
         self.client = TestClient(self.app)
 
+    # Test: Validates GET /dangerous-permissions returns HTTP 200 with empty list when no Redis snapshot exists.
     def test_get_dangerous_permissions_empty(self):
         self.mock_redis.get = AsyncMock(return_value=None)
         response = self.client.get("/dangerous-permissions")
@@ -26,6 +28,7 @@ class TestDangerousPermissionsAPI(unittest.TestCase):
         self.assertEqual(data["findings"], [])
         self.mock_redis.get.assert_called_once_with(DANGEROUS_PERMS_KEY)
 
+    # Test: Ensures URL trailing slash compatibility (/dangerous-permissions/) without HTTP redirects.
     def test_get_dangerous_permissions_with_slash(self):
         self.mock_redis.get = AsyncMock(return_value=None)
         response = self.client.get("/dangerous-permissions/")
@@ -34,6 +37,7 @@ class TestDangerousPermissionsAPI(unittest.TestCase):
         self.assertEqual(data["count"], 0)
         self.assertEqual(data["findings"], [])
 
+    # Test: Validates API response serialization and correct count/findings extraction from Redis cache.
     def test_get_dangerous_permissions_populated(self):
         mock_findings = [
             {

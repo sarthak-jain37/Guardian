@@ -9,10 +9,12 @@ from backend.app.services.permission_scanner import (
 
 class TestPermissionScanner(unittest.TestCase):
 
+    # Test: Validates graceful handling of empty ({}) or None input without throwing exceptions.
     def test_empty_and_none_state(self):
         self.assertEqual(scan_dangerous_permissions({}), [])
         self.assertEqual(scan_dangerous_permissions(None), [])
 
+    # Test: Verifies that least-privilege roles (e.g. read-only pod access) produce zero false-positive alerts.
     def test_benign_role_has_no_findings(self):
         state = {
             "Role_default_pod-reader": {
@@ -30,6 +32,7 @@ class TestPermissionScanner(unittest.TestCase):
         findings = scan_dangerous_permissions(state)
         self.assertEqual(len(findings), 0)
 
+    # Test: Ensures non-role Kubernetes objects (ServiceAccounts, RoleBindings) are skipped during rule evaluation.
     def test_ignored_kinds(self):
         state = {
             "ServiceAccount_default_my-sa": {
@@ -44,6 +47,7 @@ class TestPermissionScanner(unittest.TestCase):
         findings = scan_dangerous_permissions(state)
         self.assertEqual(len(findings), 0)
 
+    # Test: Validates membership check for wildcard verbs within arrays (e.g. ['get', '*']) to prevent evasion.
     def test_wildcard_array_trap(self):
         """Ensure ['get', '*'] is caught as a wildcard verb, not bypassed by strict equality."""
         state = {
@@ -65,6 +69,7 @@ class TestPermissionScanner(unittest.TestCase):
         self.assertIn("WILDCARD_VERBS", role["flags"])
         self.assertEqual(role["severity"], "HIGH")
 
+    # Test: Verifies case-normalization prevents uppercase or mixed-case evasion (e.g. 'BIND', 'SECRETS').
     def test_case_insensitivity(self):
         """Ensure uppercase or mixed case verbs and resources are correctly flagged."""
         state = {
@@ -88,6 +93,7 @@ class TestPermissionScanner(unittest.TestCase):
         self.assertIn("WILDCARD_API_GROUPS", role["flags"])
         self.assertEqual(role["severity"], "CRITICAL")
 
+    # Test: Validates individual detection and CRITICAL severity assignment for 'bind', 'impersonate', and 'escalate'.
     def test_all_dangerous_verbs(self):
         """Test bind, impersonate, and escalate detection."""
         for verb in ["bind", "impersonate", "escalate"]:
@@ -111,6 +117,7 @@ class TestPermissionScanner(unittest.TestCase):
                 self.assertIn(flag, findings[0]["flags"])
                 self.assertEqual(findings[0]["severity"], "CRITICAL")
 
+    # Test: Verifies cluster-admin superuser access ('*' verbs on '*' resources) is flagged as CRITICAL.
     def test_full_cluster_admin_wildcard(self):
         """Test * verb and * resource combination."""
         state = {
@@ -132,6 +139,7 @@ class TestPermissionScanner(unittest.TestCase):
         self.assertIn("FULL_ADMIN_WILDCARD", role["flags"])
         self.assertEqual(role["severity"], "CRITICAL")
 
+    # Test: Validates detection of sensitive subresources (e.g. 'serviceaccounts/token' credential minting).
     def test_sensitive_subresource(self):
         """Test subresource like serviceaccounts/token."""
         state = {
@@ -151,6 +159,7 @@ class TestPermissionScanner(unittest.TestCase):
         self.assertEqual(len(findings), 1)
         self.assertIn("SENSITIVE_RESOURCE_SERVICEACCOUNTS", findings[0]["flags"])
 
+    # Test: Verifies findings list is sorted in descending severity order (CRITICAL -> HIGH -> MEDIUM).
     def test_severity_sorting(self):
         """CRITICAL findings must come before HIGH and MEDIUM."""
         state = {

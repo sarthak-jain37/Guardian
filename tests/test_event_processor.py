@@ -14,6 +14,7 @@ from backend.app.services.event_processor import process_events
 
 class TestEventProcessorIntegration(unittest.TestCase):
 
+    # Helper: Simulates arrival of a new apply event and verifies scanner execution.
     @patch("backend.app.services.event_processor.get_latest_event_timestamp")
     @patch("backend.app.services.event_processor.get_last_processed_timestamp")
     @patch("backend.app.services.event_processor.run_apply_script")
@@ -49,10 +50,12 @@ class TestEventProcessorIntegration(unittest.TestCase):
         mock_scan_danger.assert_called_once_with(fake_baseline)
         mock_save_danger.assert_called_once_with(mock_scan_danger.return_value, mock_redis)
 
+    # Test: Verifies that detecting a new 'kubectl apply' event triggers both baseline update and a dangerous permissions rescan.
     def test_apply_event_triggers_scan(self):
         import asyncio
         asyncio.run(self._run_apply_event_test())
 
+    # Helper: Simulates arrival of a modify event (edit/patch) and verifies diff calculation and scanner execution.
     @patch("backend.app.services.event_processor.get_latest_event_timestamp")
     @patch("backend.app.services.event_processor.get_last_processed_timestamp")
     @patch("backend.app.services.event_processor.get_rbac_state")
@@ -89,10 +92,12 @@ class TestEventProcessorIntegration(unittest.TestCase):
         mock_scan_danger.assert_called_once_with(fake_current)
         mock_save_danger.assert_called_once_with([], mock_redis)
 
+    # Test: Verifies that detecting a 'kubectl edit/patch' event triggers diff calculation and updates the dangerous permissions cache.
     def test_modify_event_triggers_scan(self):
         import asyncio
         asyncio.run(self._run_modify_event_test())
 
+    # Helper: Simulates an idle polling cycle with no new audit events.
     @patch("backend.app.services.event_processor.get_latest_event_timestamp")
     @patch("backend.app.services.event_processor.get_last_processed_timestamp")
     @patch("backend.app.services.event_processor.scan_dangerous_permissions")
@@ -113,6 +118,7 @@ class TestEventProcessorIntegration(unittest.TestCase):
 
         mock_scan_danger.assert_not_called()
 
+    # Test: Validates CPU optimization - idle polling cycles without RBAC changes do not trigger expensive scans.
     def test_no_event_does_not_trigger_scan(self):
         import asyncio
         asyncio.run(self._run_no_event_test())

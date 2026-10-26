@@ -1,0 +1,11 @@
+profile = "dev-laptop"
+provider = "llama-cpp"
+model_name = "local-gguf"
+model_path = "/replace/with/model.gguf"
+context_length = 8192
+max_output_tokens = 2048
+request_timeout_seconds = 180
+active_run_timeout_seconds = 600
+threads = 4
+concurrency = 1
+queue_limit = 4
