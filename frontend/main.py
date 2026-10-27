@@ -266,6 +266,163 @@ def llm_page():
     identity=active_pod();review_panel(identity)
 
 
+def approval_queue_page():
+    st.title('HITL Approval Queue')
+    st.write('Review detected RBAC drift and newly proposed policies. Every change requires human sign-off; the AI explains and advises.')
+
+    top_col, scan_col = st.columns([3, 1])
+    with scan_col:
+        if st.button('Scan for drift now', type='secondary', width='stretch'):
+            try:
+                res = requests.post(BACKEND_URL + '/drift/scan-now', timeout=30)
+                if res.ok:
+                    data = res.json()
+                    st.success(f"Scan complete: {data.get('findings_count', 0)} drift finding(s)")
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.error(f"Scan failed: {res.text}")
+            except Exception as e:
+                st.error(f"Could not trigger scan: {e}")
+
+    queue_data = api('/approval/queue')
+    entries = queue_data.get('entries', [])
+
+    crit = sum(1 for e in entries if e.get('risk_tier') == 'CRITICAL')
+    high = sum(1 for e in entries if e.get('risk_tier') == 'HIGH')
+    low = sum(1 for e in entries if e.get('risk_tier') == 'LOW')
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric('Pending approvals', len(entries))
+    m2.metric('Critical risk', crit)
+    m3.metric('High risk', high)
+    m4.metric('Low risk', low)
+
+    if not entries:
+        st.success('Approval queue is clean. No pending drifts require review.')
+        return
+
+    st.subheader('Pending drift findings and policy proposals')
+    for entry in entries:
+        qid = entry['id']
+        tier = entry.get('risk_tier', 'LOW')
+        badge_color = 'red' if tier == 'CRITICAL' else ('orange' if tier == 'HIGH' else 'green')
+        sa = entry.get('sa_key', '__CLUSTER__')
+        count = entry.get('version_count', 1)
+
+        with st.container(border=True):
+            header_col, action_col = st.columns([2.5, 1.5])
+            with header_col:
+                st.markdown(f"**:{badge_color}[{tier}]** · `{sa}`")
+                st.caption(f"Event: {entry.get('event_type', 'DRIFT_DETECTED')} · Created: {timestamp(entry.get('created_at'))} · Accumulated versions: {count}")
+                if count > 1:
+                    st.info(f"Collapsed: {count} changes accumulated before review. Default view shows net diff.")
+
+            with action_col:
+                b1, b2 = st.columns(2)
+                if b1.button('Approve', key=f"app_{qid}", type='primary', width='stretch'):
+                    try:
+                        resp = requests.post(
+                            f"{BACKEND_URL}/approval/{qid}/decision",
+                            json={"decision": "promote", "actor": "admin", "note": "Approved via dashboard"},
+                            timeout=30,
+                        )
+                        res_json = resp.json()
+                        if resp.ok and res_json.get('status') == 'promoted':
+                            st.success('Baseline promoted successfully!')
+                            st.cache_data.clear()
+                            st.rerun()
+                        elif res_json.get('status') == 'conflict':
+                            st.warning(f"Version Guard Conflict: {res_json.get('message')}")
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error(f"Approval failed: {resp.text}")
+                    except Exception as err:
+                        st.error(f"Error submitting decision: {err}")
+
+                if b2.button('Reject', key=f"rej_{qid}", width='stretch'):
+                    try:
+                        resp = requests.post(
+                            f"{BACKEND_URL}/approval/{qid}/decision",
+                            json={"decision": "reject", "actor": "admin", "note": "Rejected via dashboard"},
+                            timeout=30,
+                        )
+                        if resp.ok:
+                            st.info('Baseline change rejected.')
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error(f"Rejection failed: {resp.text}")
+                    except Exception as err:
+                        st.error(f"Error submitting decision: {err}")
+
+            st.markdown("**LLM Security Explanation**")
+            st.write(entry.get('llm_analysis') or 'No LLM analysis available.')
+
+            st.markdown("**Net Diff (Original Baseline vs Latest Live State)**")
+            st.json(entry.get('net_diff') or entry.get('diff_summary'), expanded=False)
+
+            chain = entry.get('version_chain') or []
+            if chain and len(chain) > 1:
+                with st.expander(f"View Full Report ({len(chain)} intermediate changes)"):
+                    st.caption('Evolutionary history of changes for this role:')
+                    for item in chain:
+                        ver = item.get('version')
+                        sev = item.get('severity', 'LOW')
+                        conf = item.get('confidence', 0.9)
+                        ts = timestamp(item.get('timestamp'))
+                        st.markdown(f"**Version {ver}** · Severity: `{sev}` · Confidence: `{conf}` · Timestamp: `{ts}`")
+                        st.json(item.get('diff_from_prev'), expanded=False)
+
+    with st.expander("Authoritative Baseline & Version History"):
+        try:
+            active_res = requests.get(BACKEND_URL + '/baselines/active', timeout=10)
+            if active_res.ok:
+                act = active_res.json()
+                st.subheader(f"Authoritative Active Baseline (Version {act.get('version_number', '1')})")
+                col_a, col_b = st.columns([3, 1])
+                with col_a:
+                    st.write(f"**Baseline ID**: `{act.get('baseline_id')}`")
+                    st.write(f"**Canonical Hash**: `{act.get('canonical_hash')}`")
+                    st.caption(f"Applied at: {timestamp(act.get('applied_at'))} · Approved by: {act.get('approved_by') or 'system'}")
+                with col_b:
+                    if act.get('parent_id'):
+                        if st.button("Rollback (Mark Broken)", type="secondary", width="stretch"):
+                            try:
+                                rb_res = requests.post(f"{BACKEND_URL}/baselines/{act.get('baseline_id')}/rollback", timeout=30)
+                                if rb_res.ok:
+                                    st.warning(f"Baseline marked BROKEN_ROLLBACK. Restored parent baseline {act.get('parent_id')}.")
+                                    st.cache_data.clear()
+                                    st.rerun()
+                                else:
+                                    st.error(f"Rollback failed: {rb_res.text}")
+                            except Exception as e:
+                                st.error(f"Error during rollback: {e}")
+            else:
+                st.info("No active baseline currently recorded.")
+
+            hist_res = requests.get(BACKEND_URL + '/baselines/history', timeout=10)
+            if hist_res.ok:
+                history = hist_res.json().get('history', [])
+                if history:
+                    st.markdown("**Version History Audit Trail**")
+                    rows = []
+                    for h in history:
+                        rows.append({
+                            "Version": f"v{h.get('version_number')}",
+                            "Status": h.get('status'),
+                            "Applied At": timestamp(h.get('applied_at')),
+                            "Approved By": h.get('approved_by') or "system",
+                            "Baseline ID": h.get('baseline_id'),
+                            "Canonical Hash": (h.get('canonical_hash') or '')[:16] + "...",
+                        })
+                    st.dataframe(rows, hide_index=True, width='stretch')
+        except Exception as e:
+            st.caption(f"Could not load baseline history: {e}")
+
+
+
 st.markdown('<div class="brand">GUARDIAN / CLUSTER OBSERVABILITY</div>',unsafe_allow_html=True)
 status=api('/telemetry/status');inventory=api('/telemetry/pods');all_pods=inventory.get('pods',[])
 bar1,bar2,bar3=st.columns([2,2,1])
@@ -277,7 +434,8 @@ namespace=None if chosen_namespace=='All namespaces' else chosen_namespace
 if bar3.button('Refresh data',width='stretch'):st.cache_data.clear();st.rerun()
 nav_pages=[st.Page(overview,title='Overview',url_path='overview',default=True),st.Page(connections,title='Connections',url_path='connections')]
 pod_page=st.Page(pod_workspace,title='Pod workspace',url_path='pod')
-nav_pages.extend([pod_page,st.Page(permissions_page,title='Permissions',url_path='permissions'),st.Page(evidence_page,title='Evidence',url_path='evidence'),st.Page(llm_page,title='LLM review',url_path='review')])
+approval_page=st.Page(approval_queue_page,title='Approval queue',url_path='approval')
+nav_pages.extend([pod_page,approval_page,st.Page(permissions_page,title='Permissions',url_path='permissions'),st.Page(evidence_page,title='Evidence',url_path='evidence'),st.Page(llm_page,title='LLM review',url_path='review')])
 current_page=st.navigation(nav_pages,position='hidden')
 links=[]
 for item in nav_pages:
@@ -286,3 +444,4 @@ for item in nav_pages:
     links.append('<a href="'+href+'" target="_self"'+selected+'>'+html.escape(item.title)+'</a>')
 st.markdown('<style>.guardian-nav{display:flex;gap:6px;flex-wrap:wrap;padding:12px 0 18px;border-bottom:1px solid #24344c;margin-bottom:22px}.guardian-nav a{color:#a9bdd2!important;padding:9px 12px;border-radius:7px;font-size:14px;text-decoration:none}.guardian-nav a:hover{background:#17283c}.guardian-nav a.active{background:#203a56;color:#eaf4ff!important;font-weight:600}</style><nav class="guardian-nav" aria-label="Guardian features">'+''.join(links)+'</nav>',unsafe_allow_html=True)
 current_page.run()
+

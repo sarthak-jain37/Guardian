@@ -32,8 +32,12 @@ class TestEventProcessorIntegration(unittest.TestCase):
         mock_get_last,
         mock_get_latest,
     ):
-        mock_redis = MagicMock()
+        mock_redis = AsyncMock()
+        mock_redis.sismember.return_value = False
+        mock_redis.zcard.return_value = 0
+        mock_redis.get.return_value = None
         mock_k8s = MagicMock()
+
 
         # Simulate a new apply event
         apply_time = datetime(2026, 9, 10, 10, 0, tzinfo=timezone.utc)

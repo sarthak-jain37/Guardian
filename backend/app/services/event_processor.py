@@ -2,6 +2,8 @@ from agents.summarizer import analyse_document
 from backend.app.services.kubernetes_service import KubernetesService
 from backend.app.services.permission_scanner import scan_dangerous_permissions
 from backend.app.services.script_runner import run_apply_script, run_modify_script
+from backend.app.services.baseline_service import create_baseline
+from backend.app.services.drift_detector import run_drift_scan
 from backend.app.services.redis_service import (
     get_last_processed_timestamp,
     get_rbac_state,
@@ -28,7 +30,6 @@ CURRENT_KEY = "rbac:current"
 
 
 async def process_events(data, redis, k8s: KubernetesService) -> None:
-    
     most_recent_apply = get_latest_event_timestamp(data, APPLY_FIELDS)
     most_recent_modify = get_latest_event_timestamp(data, MODIFY_FIELDS)
 
@@ -43,6 +44,15 @@ async def process_events(data, redis, k8s: KubernetesService) -> None:
     if most_recent_apply and (last_processed_apply is None or most_recent_apply > last_processed_apply):
         baseline = run_apply_script(k8s)
         
+        # Create a baseline via baseline_service instead of raw save_rbac_state()
+        await create_baseline(
+            rbac_state=baseline,
+            sa_key="__CLUSTER__",
+            status="ACTIVE",
+            approved_by="kubectl-apply",
+            run_id=None,
+            redis=redis,
+        )
         await save_rbac_state(BASELINE_KEY, baseline, redis)
         await set_last_processed_timestamp("apply", most_recent_apply.isoformat(), redis)
 
@@ -51,14 +61,22 @@ async def process_events(data, redis, k8s: KubernetesService) -> None:
         await save_dangerous_permissions(findings, redis)
         
     if most_recent_modify and (last_processed_modify is None or most_recent_modify > last_processed_modify):
+        # On modify events: trigger drift detection
+        try:
+            await run_drift_scan(redis, k8s)
+        except Exception:
+            pass
+
         baseline = await get_rbac_state(BASELINE_KEY, redis)
-        
         current, diff_dict = run_modify_script(k8s, baseline)
         
         await save_rbac_state(CURRENT_KEY, current, redis)
         
         if diff_dict:
-            llm_response = analyse_document(diff_dict)
+            try:
+                llm_response = analyse_document(diff_dict)
+            except Exception:
+                llm_response = "Automated analysis unavailable"
             
             await save_drift_event(diff_dict, llm_response, redis)
         
