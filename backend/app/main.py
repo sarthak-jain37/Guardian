@@ -29,13 +29,17 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    redis = Redis.from_url(REDIS_URL, decode_responses=True)
+    redis = Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=30, socket_connect_timeout=10)
     k8s = KubernetesService()
     
     app.state.redis = redis
     app.state.k8s = k8s
     app.state.telemetry = Telemetry(redis)
+    from backend.app.services.permission_proposals import PermissionProposals
+    app.state.permission_proposals = PermissionProposals(redis,k8s,app.state.telemetry.cluster)
+    await app.state.permission_proposals.recover_interrupted()
     app.state.pod_grader = PodGrader(app.state.telemetry)
+    app.state.pod_grader.proposals = app.state.permission_proposals
     telemetry_tasks = app.state.telemetry.start()
     telemetry_tasks.append(asyncio.create_task(app.state.pod_grader.run()))
     telemetry_tasks.append(asyncio.create_task(refresh_inventory(app.state.telemetry, k8s)))
@@ -100,6 +104,8 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         pass
 
+    for task in list(app.state.permission_proposals.tasks):task.cancel()
+    await asyncio.gather(*app.state.permission_proposals.tasks,return_exceptions=True)
     await redis.aclose()
     k8s.api_client.close()
 

@@ -1,3 +1,4 @@
+from typing import Literal
 import asyncio
 from fastapi import APIRouter, Query, Request
 from backend.app.services.pod_evidence import pod_evidence
@@ -111,6 +112,8 @@ async def reviews(request: Request, namespace: str | None = None):
 async def alerts(request: Request, namespace: str | None = None):
     grader = request.app.state.pod_grader
     records = await grader.records('alerts', namespace)
+    from backend.app.services.grading import alert_freshness
+    records=[alert_freshness(record,await grader.get('reviews',record['uid'])) if record.get('uid') else record for record in records]
     return {'alerts': records, 'unread': sum(r['active'] and not r['acknowledged'] for r in records),
             'worker': grader.health}
 
@@ -128,3 +131,37 @@ async def acknowledge_alert(request: Request, uid: str, body: AcknowledgeInput):
     if result is None:
         raise HTTPException(404, 'Alert not found or expired')
     return result
+
+
+@router.get('/pods/{namespace}/{pod}/configuration')
+async def configuration(request: Request, namespace: str, pod: str):
+    from fastapi import HTTPException
+    from kubernetes.client.exceptions import ApiException
+    from backend.app.services.pod_configuration import pod_configuration
+    try:
+        return await asyncio.to_thread(pod_configuration, request.app.state.k8s, namespace, pod)
+    except ApiException as exc:
+        raise HTTPException(status_code=exc.status if exc.status in (403, 404) else 502,
+                            detail='Could not read pod configuration from Kubernetes') from exc
+
+
+class PermissionDecision(BaseModel):
+    decision: Literal['accept','reject']
+    actor: str = Field(min_length=1,max_length=100)
+    note: str = Field(default='',max_length=2000)
+
+@router.get('/permission-proposals')
+async def permission_proposals(request: Request):
+    return {'proposals':await request.app.state.permission_proposals.list()}
+
+@router.get('/permission-proposals/history')
+async def permission_history(request: Request):
+    return {'history':await request.app.state.permission_proposals.history()}
+
+@router.post('/permission-proposals/{identifier}/decision')
+async def permission_decision(request: Request, identifier: str, body: PermissionDecision):
+    from fastapi import HTTPException
+    try:
+        return await request.app.state.permission_proposals.decide(identifier,body.decision,body.actor,body.note)
+    except LookupError as exc:raise HTTPException(404,str(exc)) from exc
+    except ValueError as exc:raise HTTPException(409,str(exc)) from exc

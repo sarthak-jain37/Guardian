@@ -221,3 +221,54 @@ Redis container uses AOF. Records expire after the telemetry retention period.
 No email, desktop or Slack notifications are sent. The dashboard must be open for
 the human to see notifications; background reviews continue while it is closed.
 Neither the model nor the alert service modifies RBAC or deletes pods.
+
+
+### Continuous local monitoring
+
+The `guardian-monitor.service` user service runs `scripts/dev_services.py`, which
+supervises the API, dashboard, audit export, Hubble relay forwarding/export, and
+Tetragon export. Failed child processes retry with bounded backoff. Backend
+collectors and the pod grading worker run independently of browser requests.
+Inventory polls every 10 seconds; each pod is due for model review every 120 seconds, including unchanged evidence.
+Inference is serial; queued and overdue counts disclose CPU capacity limits.
+Model input combines aggregate counts across retained history with concrete examples
+and the previous assessment. Retention bounds apply; this is not lifetime history.
+Alerts publish immediately after a valid assessment reaches the configured threshold
+(default 7/10). Model errors never clear an existing alert.
+The dashboard refreshes automatically every 10 seconds while open.
+
+Service template: `scripts/guardian-monitor.service`. On this machine it is
+installed in the user's systemd directory, enabled, and user lingering is enabled.
+Use `systemctl --user status guardian-monitor` to inspect it,
+`systemctl --user restart guardian-monitor` to restart, and
+`systemctl --user stop guardian-monitor` to stop all supervised children.
+Logs are in `output/testing/continuous` under the chat workspace.
+The machine, Docker, Redis and Kubernetes must be available; sleep/power loss
+interrupts collection. Model failures remain errors, not successful assessments.
+
+
+### Critical alerts and permission decisions
+
+Only confirmed scores of 9–10 appear as red critical alerts. Both model passes
+must cite corroborating observations from different collectors; root status,
+ordinary token reads, permissions, and denied requests alone cannot qualify.
+Critical reviews automatically queue a model-generated permission proposal.
+The model selects removal IDs from existing rules; it cannot create grants or
+execute commands. Proposed manifests are built and validated by the server.
+
+The Alerts page shows the exact before/after Role and RoleBinding objects and
+all pods sharing the service account. Only Roles exclusively bound to that
+service account in the pod's namespace can be reduced. Shared/cluster-wide
+roles require manually scoped remediation. Other grants may still authorize
+the same actions. RoleBinding subjects and role references are preserved;
+an annotation records the accepted proposal.
+
+Accept and Reject are explicit client decisions. Acceptance rechecks the
+critical assessment, pod UID, service account, affected pods, RBAC snapshot,
+and resource versions before writing. Changed proposals are blocked. Partial
+execution is recorded rather than reported as success. Repeated decisions do
+not repeat writes. Redis stores proposal manifests and an append-only decision
+stream without expiry, including actor name supplied by the local operator,
+notes, timestamps and execution receipts. This local application does not
+provide authenticated operator identity; do not expose its write API publicly.
+After a restart, interrupted applications are marked unknown for reconciliation.

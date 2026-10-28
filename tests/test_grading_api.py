@@ -10,6 +10,7 @@ class GradingAPITests(unittest.TestCase):
         app=FastAPI();app.include_router(router)
         self.grader=AsyncMock();self.grader.health={'enabled':True,'state':'waiting'}
         app.state.pod_grader=self.grader
+        self.permissions=AsyncMock();app.state.permission_proposals=self.permissions
         app.state.telemetry=AsyncMock()
         self.client=TestClient(app)
 
@@ -38,3 +39,16 @@ class GradingAPITests(unittest.TestCase):
         self.grader.review.assert_awaited_once()
         self.assertTrue(self.grader.review.call_args.kwargs['force'])
         self.assertEqual(self.grader.review.call_args.args[0]['operator_question'],'Explain this pod')
+
+    def test_permission_decision_requires_explicit_valid_choice(self):
+        self.assertEqual(self.client.post('/telemetry/permission-proposals/id/decision',json={'decision':'apply','actor':'operator'}).status_code,422)
+        self.permissions.decide.assert_not_awaited()
+        self.permissions.decide.return_value={'status':'rejected'}
+        response=self.client.post('/telemetry/permission-proposals/id/decision',json={'decision':'reject','actor':'operator','note':'Keep current grants'})
+        self.assertEqual(response.status_code,200)
+        self.permissions.decide.assert_awaited_once_with('id','reject','operator','Keep current grants')
+
+    def test_permission_proposal_conflict_is_reported(self):
+        self.permissions.decide.side_effect=ValueError('Already decided')
+        response=self.client.post('/telemetry/permission-proposals/id/decision',json={'decision':'accept','actor':'operator'})
+        self.assertEqual(response.status_code,409)

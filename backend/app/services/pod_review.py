@@ -1,5 +1,6 @@
 """Human-readable capability summaries and bounded, traceable pod review evidence."""
 from backend.app.services.pod_evidence import pod_evidence
+from collections import Counter
 
 SIGNALS = {
     'network_policy_or_delivery_failure': 'Traffic was dropped or a network delivery failure was observed',
@@ -13,7 +14,7 @@ SIGNALS = {
     'mount_operation_attempt': 'A process attempted a mount operation',
     'process_inspection_attempt': 'A process attempted to inspect or control another process',
     'bpf_operation_attempt': 'A process attempted a BPF operation',
-    'kubernetes_mutation_attempt': 'Service-account credentials attempted to change Kubernetes resources',
+    'kubernetes_mutation_attempt': 'Kubernetes caller attempted to change Kubernetes resources',
     'pod_interaction_attempt': 'Credentials attempted exec, attach, port forwarding or ephemeral-container access',
     'credential_api_access_attempt': 'Credentials attempted to access secrets or request a service-account token',
     'api_authentication_or_authorization_denied': 'The API server denied an authentication or authorization request',
@@ -150,6 +151,25 @@ def compact_event(event):
     return result
 
 
+def summarize_history(record):
+    """Count every retained observation, preserving attribution boundaries."""
+    events=record['events']
+    affected=record.get('actions_affecting_pod', [])
+    times=sorted(e.get('timestamp') or e.get('observed_at') for e in events if e.get('timestamp') or e.get('observed_at'))
+    def counts(values):
+        return dict(Counter(str(v) for v in values if v is not None))
+    return {'scope':'All currently retained observations for this pod instance; bounded by event retention, not lifetime history.',
+            'attributed_observations':len(events), 'first_event':times[0] if times else None, 'last_event':times[-1] if times else None,
+            'event_types':counts(e.get('kind') for e in events),
+            'network_outcomes':counts(e.get('verdict') for e in events),
+            'api_actions':counts(str(e.get('verb'))+' '+str(e.get('target',{}).get('resource'))+' '+str(e.get('outcome')) for e in events if e.get('kind')=='kubernetes_audit'),
+            'processes':counts(e.get('process',{}).get('binary') for e in events),
+            'signals':counts(f for e in events for f in e.get('findings',[])),
+            'shared_identity_observations':len(record['shared_identity_audit_events']),
+            'actions_affecting_pod':counts(str(e.get('verb'))+' by '+str(e.get('actor')) for e in affected),
+            'lifecycle_scope':'Actions affecting this namespace/name may concern earlier pod UIDs; they are not actions performed by this pod.'}
+
+
 async def review_context(service, namespace, pod, limit=12):
     evidence=await pod_evidence(service, namespace, pod, service.maximum)
     if not evidence['pods']:return None
@@ -158,8 +178,10 @@ async def review_context(service, namespace, pod, limit=12):
     shared=representative_events(record['shared_identity_audit_events'],min(limit,3))
     return {'cluster':service.cluster, 'pod':{k:identity.get(k) for k in ('namespace','pod','uid','service_account_name','node','phase','host_network','host_pid','host_ipc','security_context')},
             'containers':[{k:c.get(k) for k in ('name','image','security_context','resources','volume_mounts')} for c in identity.get('containers',[])],
+            'history_summary':summarize_history(record),
             'permission_points':permission_points(identity), 'events':[compact_event(e) for e in selected],
             'shared_identity_events':[compact_event(e) for e in shared],
+            'actions_affecting_pod':[dict(compact_event(e), actor=e.get('actor'), relationship=e.get('relationship'), instance_match=e.get('instance_match')) for e in representative_events(record.get('actions_affecting_pod',[]),min(limit,4))],
             'boundaries':[b for b in service.boundaries if b.get('namespace')==namespace and b.get('pod',pod)==pod],
             'coverage':service.health,'inventory_observed_at':evidence['inventory_observed_at'],
             'sample':{'selected':len(selected),'retained_attributed_events':len(record['events']),'shared_identity_events':len(record['shared_identity_audit_events']),'strategy':'Distinct actions prioritized by observed signals; normal observations are also sampled. Not a complete history.'},

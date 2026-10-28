@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 from typing import Literal
@@ -39,13 +40,45 @@ def validate_grade(raw, document):
         raise ValueError('Model cited evidence outside this review')
     if grade.status == 'assessed' and not set(grade.evidence_ids) & attributed:
         raise ValueError('A pod score requires attributed evidence, not only shared identity')
+    reasons=[reason.strip().casefold() for reason in grade.reasons]
+    sentences=[part.strip().casefold() for reason in grade.reasons for part in re.split(r'[.!?]+',reason) if len(part.strip().split())>5]
+    if len(set(sentences)) != len(sentences):
+        raise ValueError('Model repeated sentences inside its explanation')
+    if len(set(reasons)) != len(reasons):
+        raise ValueError('Model repeated an explanation')
+    if any(len(reason.split()) < 4 for reason in grade.reasons):
+        raise ValueError('Model explanation lacks meaningful detail')
     return grade.model_dump()
+
+
+def alert_freshness(alert, latest):
+    """Keep unresolved historical warnings without presenting them as current scores."""
+    unavailable=not latest or latest.get('status')!='assessed'
+    legacy=alert.get('assessment_version')!=2
+    different=bool(latest) and latest.get('reviewed_at')!=alert.get('reviewed_at')
+    return {**alert,'historical':unavailable or legacy or different,
+            'current_severity':latest.get('severity') if latest and latest.get('status')=='assessed' else None,
+            'latest_review':latest,
+            'history_reason':'Latest review has no valid score' if unavailable else 'Earlier assessment; see the latest review' if different else 'Legacy assessment predates current validation' if legacy else None}
+
+
+def validate_critical_support(grade,document):
+    cited=[e for e in document.get('events',[]) if e['id'] in grade['evidence_ids']]
+    channels={e.get('source') or e.get('kind') for e in cited}
+    corroborating={'binary_outside_boundary','destination_namespace_outside_boundary','execution_from_writable_directory'}
+    strong=any(corroborating & set(e.get('findings',[])) for e in cited)
+    for event in cited:
+        paths=event.get('runtime',{}).get('file_paths',[])
+        if 'sensitive_file_access_attempt' in event.get('findings',[]) and any('/serviceaccount/' not in path and not path.endswith('/token') for path in paths):strong=True
+    if len(channels)<2 or not strong:
+        raise ValueError('Critical grade lacks independently cited, non-routine evidence; root or token reads alone are not critical')
 
 
 def fingerprint(document):
     stable = {k: document.get(k) for k in ('pod', 'containers', 'permission_points', 'boundaries')}
-    stable['grading_configuration'] = {'rubric':'severity-v1', 'model':os.getenv('MODEL_PATH',''), 'context':os.getenv('LLM_CONTEXT_SIZE','8192'), 'output_tokens':os.getenv('LLM_GRADE_MAX_TOKENS','512')}
+    stable['grading_configuration'] = {'rubric':'severity-v2-history', 'model':os.getenv('MODEL_PATH',''), 'context':os.getenv('LLM_CONTEXT_SIZE','8192'), 'output_tokens':os.getenv('LLM_GRADE_MAX_TOKENS','512')}
     stable['events'] = [e['id'] for e in document.get('events', [])]
+    stable['history'] = document.get('history_summary')
     stable['shared'] = [e['id'] for e in document.get('shared_identity_events', [])]
     # Collection error changes matter, but moving collection timestamps do not.
     stable['coverage'] = {k: {'state': v.get('state'), 'error': v.get('error')} for k, v in document.get('coverage', {}).items()}
@@ -65,13 +98,14 @@ class PodGrader:
     def __init__(self, telemetry, infer=None):
         self.telemetry, self.redis = telemetry, telemetry.redis
         self.prefix = telemetry.prefix + ':grading'
-        self.interval = max(10, int(os.getenv('POD_REVIEW_INTERVAL', '60')))
+        self.interval = max(10, int(os.getenv('POD_REVIEW_INTERVAL', '120')))
         self.threshold = max(1, min(10, int(os.getenv('POD_ALERT_THRESHOLD', '7'))))
         self.sample = max(3, min(30, int(os.getenv('POD_REVIEW_EVENT_LIMIT', '8'))))
         self.enabled = os.getenv('POD_REVIEW_ENABLED', 'true').lower() == 'true'
         self.ttl = telemetry.ttl
         self.lock = asyncio.Lock()
         self.state_lock = asyncio.Lock()
+        self.proposals = None
         self.infer = infer
         self.health = {'enabled': self.enabled, 'state': 'starting' if self.enabled else 'disabled',
                        'interval_seconds': self.interval, 'alert_threshold': self.threshold,
@@ -106,12 +140,13 @@ class PodGrader:
             uid, namespace, pod = identity['uid'], identity['namespace'], identity['pod']
             previous = await self.get('reviews', uid)
             signature = fingerprint(document)
-            if not force and previous and previous.get('fingerprint') == signature and previous.get('status') != 'error':
+            if not force and previous and previous.get('fingerprint') == signature and previous.get('status') != 'error' and time.time()-datetime.fromisoformat(previous['reviewed_at']).timestamp()<self.interval:
                 return previous
             self.health.update(state='reviewing', current_pod=namespace + '/' + pod)
             now = datetime.now(timezone.utc).isoformat()
             record = {'cluster': document['cluster'], 'namespace': namespace, 'pod': pod, 'uid': uid,
                       'review_started_at': now, 'reviewed_at': now, 'fingerprint': signature, 'sample': document['sample'],
+                      'assessment_version':2, 'history_summary':document.get('history_summary',{}), 'next_review_due_at':None,
                       'coverage': document['coverage'], 'evidence': document.get('events', []),
                       'shared_identity_evidence': document.get('shared_identity_events', []), 'model_assessment': True,
                       'remediation_enabled': False, 'scoring_enabled': True}
@@ -124,14 +159,25 @@ class PodGrader:
                     if infer is None:
                         from agents.summarizer import grade_document
                         infer = grade_document
-                    raw = await asyncio.to_thread(infer, document)
-                record.update(validate_grade(raw, document))
+                    request={**document, 'previous_assessment': {k:previous.get(k) for k in ('severity','reasons','reviewed_at')} if previous else None}
+                    raw = await asyncio.to_thread(infer, request)
+                validated=validate_grade(raw,document)
+                if validated.get('severity') is not None and validated['severity']>8:
+                    validate_critical_support(validated,document)
+                    confirmation=validate_grade(await asyncio.to_thread(infer,{**request,'operator_question':'Independently verify whether concrete cited evidence justifies critical severity 9-10. Challenge the initial interpretation; routine behavior and permissions alone are not critical.'}),document)
+                    if confirmation.get('severity') is None or confirmation['severity']<=8:raise ValueError('Critical assessment was not confirmed on second review')
+                    validate_critical_support(confirmation,document)
+                    validated=confirmation
+                    record['critical_confirmed']=True
+                record.update(validated)
             except Exception as exc:
                 logger.exception('Pod model assessment failed for %s/%s', namespace, pod)
                 record.update(status='error', severity=None, reasons=['Local model review could not be validated.'],
                               evidence_ids=[], uncertainty='No valid grade was produced. Previous alerts remain available.',
                               next_checks=['Inspect model configuration, context size and service logs.'], error_type=type(exc).__name__)
             record['reviewed_at'] = datetime.now(timezone.utc).isoformat()
+            record['review_duration_seconds']=round(time.time()-datetime.fromisoformat(now).timestamp(),2)
+            record['next_review_due_at'] = datetime.fromtimestamp(datetime.fromisoformat(now).timestamp()+self.interval,timezone.utc).isoformat()
             if not await self.inventory_matches(uid, namespace, pod):
                 self.health.update(state='idle', current_pod=None)
                 return {**record, 'status': 'superseded', 'severity': None}
@@ -156,6 +202,8 @@ class PodGrader:
                  'acknowledged': False if reopen else (old or {}).get('acknowledged', False),
                  'version': (old or {}).get('version', 0) + 1}
         await self.put('alerts', uid, alert)
+        if record['severity']>8 and record.get('critical_confirmed') and self.proposals:
+            await self.proposals.ensure(record,document)
 
     async def acknowledge(self, uid, version):
         # The same lock protects against acknowledging over a newly raised alert.
@@ -170,28 +218,36 @@ class PodGrader:
             return record
 
     async def run(self):
-        if not self.enabled:
-            return
+        if not self.enabled: return
+        due={}
         while True:
             try:
-                snapshot = json.loads(await self.redis.get(self.telemetry.prefix + ':inventory') or '{}')
-                self.health.pop('error', None)
-                self.health.update(state='scanning', last_scan_at=datetime.now(timezone.utc).isoformat())
-                # Serial inference avoids competing model requests. Every current pod is visited.
-                for pod in snapshot.get('pods', []):
+                snapshot=json.loads(await self.redis.get(self.telemetry.prefix+':inventory') or '{}')
+                pods=snapshot.get('pods',[])
+                due={uid:stamp for uid,stamp in due.items() if any(p['uid']==uid for p in pods)}
+                for pod in pods:due.setdefault(pod['uid'],time.time())
+                self.health.update(state='scanning',last_scan_at=datetime.now(timezone.utc).isoformat(),pod_count=len(pods))
+                for pod in sorted(pods,key=lambda p:due.get(p['uid'],0)):
+                    uid=pod['uid']
+                    if time.time()<due.get(uid,0): continue
+                    started=time.time()
+                    self.health.update(queued_pods=sum(time.time()>=due.get(p['uid'],0) for p in pods),
+                                       overdue_pods=sum(time.time()-due.get(p['uid'],time.time())>10 for p in pods))
                     try:
-                        document = await review_context(self.telemetry, pod['namespace'], pod['pod'], self.sample)
+                        document=await review_context(self.telemetry,pod['namespace'],pod['pod'],self.sample)
                         if document:
-                            await self.review(document)
-                    except asyncio.CancelledError:
-                        raise
+                            await self.review(document,force=True)
+                    except asyncio.CancelledError: raise
                     except Exception:
-                        logger.exception('Could not review pod %s/%s; continuing cycle', pod['namespace'], pod['pod'])
-                        self.health['error'] = 'One or more pod reviews failed; check service logs'
-                self.health.update(state='waiting', current_pod=None)
-            except asyncio.CancelledError:
-                raise
+                        logger.exception('Review failed for %s/%s',pod['namespace'],pod['pod'])
+                        self.health['error']='One or more reviews failed; check logs'
+                    finally:
+                        due[uid]=started+self.interval
+                self.health.update(state='waiting',current_pod=None,
+                    overdue_pods=sum(time.time()-stamp>10 for stamp in due.values()),
+                    next_scan_at=datetime.fromtimestamp(min(due.values(),default=time.time()+10),timezone.utc).isoformat())
+            except asyncio.CancelledError: raise
             except Exception:
-                logger.exception('Continuous pod review failed')
-                self.health.update(state='error', current_pod=None, error='Review cycle failed; retrying next cycle')
-            await asyncio.sleep(self.interval)
+                logger.exception('Continuous review scheduling failed')
+                self.health.update(state='error',error='Scheduling failed; retrying')
+            await asyncio.sleep(1)

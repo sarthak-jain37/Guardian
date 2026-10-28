@@ -40,6 +40,12 @@ class SummarizerTests(unittest.TestCase):
         self.assertIsNone(result['severity'])
         args=self.model.client.create_chat_completion.call_args.kwargs
         self.assertEqual(args['response_format']['type'],'json_object')
-        self.assertIn('severity',args['response_format']['schema']['oneOf'][0]['properties'])
+        self.assertIn('severity',args['response_format']['schema']['properties'])
+        self.assertNotIn('maxLength',args['response_format']['schema']['properties']['uncertainty'])
         self.model.client.create_chat_completion.return_value['choices'][0]['finish_reason']='length'
         with self.assertRaises(ValueError):self.module.grade_document({'events':[]})
+
+    def test_short_aliases_keep_full_evidence_ids(self):
+        self.model.client.create_chat_completion.return_value={'choices':[{'message':{'content':'{"evidence_ids":["E1"]}'}}]}
+        result=self.module.grade_document({'events':[{'id':'full-evidence-id','kind':'process_exec','description':'Executed /bin/sh'}]})
+        self.assertEqual(result['evidence_ids'],['full-evidence-id'])
