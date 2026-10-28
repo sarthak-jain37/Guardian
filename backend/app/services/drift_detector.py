@@ -12,6 +12,7 @@ from backend.app.services.baseline_service import (
     get_active_baseline,
 )
 from backend.app.services.canonical_hash import canonical_hash
+from backend.app.services.event_bus import publish_event
 from backend.app.services.kubernetes_service import KubernetesService
 from backend.app.services.redis_service import (
     get_approval_queue_entry,
@@ -221,6 +222,7 @@ async def run_drift_scan(redis: Redis, k8s: KubernetesService) -> list[dict[str,
             "lazy_grouped": True,
             "version_count": version_count,
         }
+        await publish_event("DRIFT_DETECTED", finding, redis=redis)
         return [finding]
 
     else:
@@ -273,6 +275,7 @@ async def run_drift_scan(redis: Redis, k8s: KubernetesService) -> list[dict[str,
             "lazy_grouped": False,
             "version_count": 1,
         }
+        await publish_event("DRIFT_DETECTED", finding, redis=redis)
         return [finding]
 
 
@@ -347,6 +350,7 @@ async def propose_llm_policy(
         "version_chain": [],
     }
     await save_approval_queue_entry(queue_entry, redis)
+    await publish_event("NEW_POLICY_PROPOSED", {"queue_id": queue_id, "sa_key": sa_key, "risk_tier": queue_entry["risk_tier"]}, redis=redis)
     return {"status": "proposed", "queue_id": queue_id}
 
 
@@ -373,5 +377,6 @@ async def create_conflict_recheck(
         "risk_tier": risk_tier,
     }
     await update_approval_queue_entry(queue_id, updates, redis)
+    await publish_event("APPROVAL_CONFLICT", {"queue_id": queue_id, "risk_tier": risk_tier}, redis=redis)
     updated = await get_approval_queue_entry(queue_id, redis)
     return updated or {"id": queue_id}

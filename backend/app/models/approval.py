@@ -3,9 +3,25 @@ from pydantic import BaseModel, Field
 
 
 class ApprovalDecision(BaseModel):
-    decision: Literal["promote", "reject"]
+    decision: Literal["promote", "reject", "revert", "dismiss"]
     actor: str = Field(default="admin")
     note: str | None = None
+    apply_to_cluster: bool = Field(default=False)
+
+
+class ExecutionReceipt(BaseModel):
+    status: str = "success"
+    applied: list[str] = Field(default_factory=list)
+    deleted: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    timestamp: str = ""
+
+
+class RevertResult(BaseModel):
+    queue_id: str
+    status: str
+    receipt: ExecutionReceipt | dict[str, Any]
+    message: str
 
 
 class BaselineEntry(BaseModel):
@@ -28,7 +44,7 @@ class QueueEntry(BaseModel):
     baseline_id: str
     event_type: Literal["NEW_POLICY", "DRIFT_DETECTED"] = "DRIFT_DETECTED"
     risk_tier: Literal["CRITICAL", "HIGH", "LOW"]
-    status: Literal["PENDING", "PROMOTED", "REJECTED"] = "PENDING"
+    status: Literal["PENDING", "PROMOTED", "REJECTED", "REVERTED", "DISMISSED"] = "PENDING"
     diff_summary: dict[str, Any] | str
     llm_analysis: str
     sa_key: str
@@ -41,3 +57,5 @@ class QueueEntry(BaseModel):
     net_diff: dict[str, Any] | str | None = None
     version_count: int = 1
     version_chain: list[dict[str, Any]] = Field(default_factory=list)
+    revert_receipt: dict[str, Any] | None = None
+

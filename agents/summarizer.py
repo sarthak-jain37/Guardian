@@ -1,22 +1,29 @@
 import json
 import os
 import threading
-from langchain_community.llms import LlamaCpp
+try:
+    from langchain_community.llms import LlamaCpp
+except ImportError:
+    LlamaCpp = None
+
 from backend.app.core.config import MODEL_PATH
 
 
-try:
-    local_qwen = LlamaCpp(
-        model_path=MODEL_PATH,
-        temperature=0.2,
-        n_ctx=int(os.getenv('LLM_CONTEXT_SIZE', '8192')),
-        max_tokens=int(os.getenv('LLM_MAX_TOKENS', '512')),
-        n_threads=int(os.getenv('LLM_THREADS', '2')),
-        n_batch=128,
-        model_kwargs={'n_threads_batch': int(os.getenv('LLM_THREADS', '2'))},
-        verbose=False,
-    )
-except Exception:
+if LlamaCpp is not None:
+    try:
+        local_qwen = LlamaCpp(
+            model_path=MODEL_PATH,
+            temperature=0.2,
+            n_ctx=int(os.getenv('LLM_CONTEXT_SIZE', '8192')),
+            max_tokens=int(os.getenv('LLM_MAX_TOKENS', '512')),
+            n_threads=int(os.getenv('LLM_THREADS', '2')),
+            n_batch=128,
+            model_kwargs={'n_threads_batch': int(os.getenv('LLM_THREADS', '2'))},
+            verbose=False,
+        )
+    except Exception:
+        local_qwen = None
+else:
     local_qwen = None
 
 model_lock = threading.Lock()

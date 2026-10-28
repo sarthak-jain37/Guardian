@@ -3,7 +3,7 @@
 *.py[cod]
 
 # Virtual environment
-.venv/
+.venv*
 venv/*
 venv
 

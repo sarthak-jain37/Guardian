@@ -136,7 +136,7 @@ async def update_approval_queue_entry(queue_id: str, updates: dict[str, Any], re
         await redis.hset(f"rbac:approval_queue:{queue_id}", mapping=mapping)
 
     status = updates.get("status")
-    if status in ("PROMOTED", "REJECTED"):
+    if status in ("PROMOTED", "REJECTED", "REVERTED", "DISMISSED"):
         resolved_at = updates.get("resolved_at") or datetime.now(timezone.utc).isoformat()
         try:
             resolved_timestamp = datetime.fromisoformat(resolved_at.replace("Z", "+00:00")).timestamp()
@@ -166,6 +166,17 @@ async def get_pending_approvals(redis: Redis) -> list[dict[str, Any]]:
     return results
 
 
+async def get_resolved_approvals(redis: Redis, limit: int = 50) -> list[dict[str, Any]]:
+    """Return resolved approval queue entries (PROMOTED, REJECTED, REVERTED, DISMISSED), newest resolved first."""
+    queue_ids = await redis.zrevrange(APPROVAL_RESOLVED_ZSET, 0, max(0, limit - 1))
+    results = []
+    for qid in queue_ids:
+        entry = await get_approval_queue_entry(qid, redis)
+        if entry:
+            results.append(entry)
+    return results
+
+
 async def get_pending_approval_by_sa(sa_key: str, redis: Redis) -> dict[str, Any] | None:
     """Find an active PENDING queue entry for a given service account / cluster key."""
     queue_ids = await redis.zrange(APPROVAL_PENDING_ZSET, 0, -1)
@@ -174,4 +185,5 @@ async def get_pending_approval_by_sa(sa_key: str, redis: Redis) -> dict[str, Any
         if entry and entry.get("sa_key") == sa_key and entry.get("status") == "PENDING":
             return entry
     return None
+
 

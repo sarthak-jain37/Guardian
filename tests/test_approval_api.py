@@ -198,6 +198,212 @@ class TestApprovalApi(unittest.TestCase):
         res_b2 = self.client.get(f"/baselines/{b2['baseline_id']}")
         self.assertEqual(res_b2.json()["status"], "BROKEN_ROLLBACK")
 
+    def test_submit_decision_revert(self):
+        state_active = {"Role_1": {"kind": "Role", "metadata": {"name": "r1"}, "rules": [{"verbs": ["get"], "resources": ["pods"]}]}}
+        b = asyncio.run(
+            baseline_service.create_baseline(
+                rbac_state=state_active,
+                sa_key="__CLUSTER__",
+                status="ACTIVE",
+                approved_by="admin",
+                run_id=None,
+                redis=self.redis,
+            )
+        )
+
+        from backend.app.services.redis_service import save_approval_queue_entry
+        queue_entry = {
+            "id": "q-revert",
+            "baseline_id": b["baseline_id"],
+            "risk_tier": "CRITICAL",
+            "status": "PENDING",
+            "diff_summary": {"values_changed": {}},
+            "llm_analysis": "Unauthorized role added",
+            "sa_key": "__CLUSTER__",
+            "snapshot_hash": "hash123",
+            "original_state": state_active,
+            "latest_state": state_active,
+        }
+        asyncio.run(save_approval_queue_entry(queue_entry, self.redis))
+
+        fake_receipt = {
+            "status": "success",
+            "applied": ["Role_default_r1"],
+            "deleted": ["Role_default_rogue"],
+            "errors": [],
+            "timestamp": "2026-10-28T10:00:00Z",
+        }
+        self.k8s.revert_to_baseline.return_value = fake_receipt
+
+        res = self.client.post(
+            "/approval/q-revert/decision",
+            json={"decision": "revert", "actor": "sec-ops"},
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["status"], "reverted")
+        self.assertEqual(data["receipt"]["deleted"], ["Role_default_rogue"])
+        self.k8s.revert_to_baseline.assert_called_once_with(state_active)
+
+        # Check queue entry was updated to REVERTED
+        detail = self.client.get("/approval/q-revert").json()
+        self.assertEqual(detail["status"], "REVERTED")
+        self.assertEqual(detail["resolved_by"], "sec-ops")
+
+    def test_dedicated_revert_endpoint(self):
+        state_active = {"Role_1": {"kind": "Role", "metadata": {"name": "r1"}, "rules": []}}
+        b = asyncio.run(
+            baseline_service.create_baseline(
+                rbac_state=state_active,
+                sa_key="__CLUSTER__",
+                status="ACTIVE",
+                approved_by="admin",
+                run_id=None,
+                redis=self.redis,
+            )
+        )
+
+        from backend.app.services.redis_service import save_approval_queue_entry
+        queue_entry = {
+            "id": "q-ded-revert",
+            "baseline_id": b["baseline_id"],
+            "risk_tier": "HIGH",
+            "status": "PENDING",
+            "diff_summary": {},
+            "llm_analysis": "test",
+            "sa_key": "__CLUSTER__",
+            "snapshot_hash": "h123",
+            "original_state": state_active,
+            "latest_state": state_active,
+        }
+        asyncio.run(save_approval_queue_entry(queue_entry, self.redis))
+
+        fake_receipt = {"status": "success", "applied": [], "deleted": [], "errors": [], "timestamp": "t"}
+        self.k8s.revert_to_baseline.return_value = fake_receipt
+
+        res = self.client.post("/approval/q-ded-revert/revert?actor=lead-admin")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["status"], "reverted")
+        self.assertEqual(res.json()["queue_id"], "q-ded-revert")
+
+    def test_submit_decision_dismiss(self):
+        state = {"Role_1": {"kind": "Role", "metadata": {"name": "r1"}, "rules": []}}
+        b = asyncio.run(
+            baseline_service.create_baseline(
+                rbac_state=state,
+                sa_key="__CLUSTER__",
+                status="PENDING_APPROVAL",
+                approved_by=None,
+                run_id=None,
+                redis=self.redis,
+            )
+        )
+
+        from backend.app.services.redis_service import save_approval_queue_entry
+        queue_entry = {
+            "id": "q-dismiss",
+            "baseline_id": b["baseline_id"],
+            "risk_tier": "LOW",
+            "status": "PENDING",
+            "diff_summary": {},
+            "llm_analysis": "benign change",
+            "sa_key": "__CLUSTER__",
+            "snapshot_hash": "h",
+        }
+        asyncio.run(save_approval_queue_entry(queue_entry, self.redis))
+
+        res = self.client.post(
+            "/approval/q-dismiss/decision",
+            json={"decision": "dismiss", "actor": "admin", "note": "Acknowledged benign drift"},
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["status"], "dismissed")
+
+        detail = self.client.get("/approval/q-dismiss").json()
+        self.assertEqual(detail["status"], "DISMISSED")
+        self.assertEqual(detail["note"], "Acknowledged benign drift")
+
+    def test_approval_history_audit_trail(self):
+        state = {"Role_1": {"kind": "Role", "metadata": {"name": "r1"}, "rules": []}}
+        b = asyncio.run(
+            baseline_service.create_baseline(
+                rbac_state=state,
+                sa_key="__CLUSTER__",
+                status="PENDING_APPROVAL",
+                approved_by=None,
+                run_id=None,
+                redis=self.redis,
+            )
+        )
+
+        from backend.app.services.redis_service import save_approval_queue_entry
+        queue_entry = {
+            "id": "q-hist-1",
+            "baseline_id": b["baseline_id"],
+            "risk_tier": "LOW",
+            "status": "PENDING",
+            "diff_summary": {},
+            "llm_analysis": "test",
+            "sa_key": "__CLUSTER__",
+            "snapshot_hash": "h",
+        }
+        asyncio.run(save_approval_queue_entry(queue_entry, self.redis))
+
+        # Reject it so it gets resolved
+        self.client.post("/approval/q-hist-1/decision", json={"decision": "reject", "actor": "auditor"})
+
+        # Fetch history
+        res_hist = self.client.get("/approval/history")
+        self.assertEqual(res_hist.status_code, 200)
+        data = res_hist.json()
+        self.assertGreaterEqual(data["count"], 1)
+        found = any(e["id"] == "q-hist-1" and e["status"] == "REJECTED" for e in data["history"])
+        self.assertTrue(found)
+
+    def test_apply_baseline_direct(self):
+        state = {"Role_1": {"kind": "Role", "metadata": {"name": "r1"}, "rules": []}}
+        b = asyncio.run(
+            baseline_service.create_baseline(
+                rbac_state=state,
+                sa_key="__CLUSTER__",
+                status="ACTIVE",
+                approved_by="admin",
+                run_id=None,
+                redis=self.redis,
+            )
+        )
+        self.k8s.revert_to_baseline.return_value = {"status": "success", "applied": ["Role_1"], "deleted": [], "errors": []}
+
+        res = self.client.post(f"/baselines/{b['baseline_id']}/apply")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["status"], "applied")
+        self.k8s.revert_to_baseline.assert_called_with(state)
+
+    def test_rollback_root_baseline_error(self):
+        state = {"Role_1": {"kind": "Role", "metadata": {"name": "r1"}, "rules": []}}
+        b = asyncio.run(
+            baseline_service.create_baseline(
+                rbac_state=state,
+                sa_key="__CLUSTER__",
+                status="ACTIVE",
+                approved_by="admin",
+                run_id=None,
+                redis=self.redis,
+                parent_id=None,
+            )
+        )
+
+        res = self.client.post(f"/baselines/{b['baseline_id']}/rollback")
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("no parent baseline", res.json()["detail"])
+
+    def test_approval_stream_endpoint(self):
+        res = self.client.get("/approval/stream?max_events=1")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("text/event-stream", res.headers["content-type"])
+        self.assertIn("CONNECTED", res.text)
+
+
 
 if __name__ == "__main__":
     unittest.main()
