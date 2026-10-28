@@ -1,3 +1,4 @@
+from typing import Literal
 import asyncio
 from fastapi import APIRouter, Query, Request
 from backend.app.services.pod_evidence import pod_evidence
@@ -19,6 +20,17 @@ async def status(request: Request):
 async def events(request: Request, limit: int = Query(100, ge=1, le=5000), namespace: str | None = None, kind: str | None = None):
     records = await request.app.state.telemetry.events(limit, namespace, kind)
     return {"count": len(records), "events": records}
+
+
+@router.get('/counts')
+async def counts(request: Request, namespace: str | None = None):
+    from collections import Counter
+    service = request.app.state.telemetry
+    records = await service.events(service.maximum, namespace)
+    return {'namespace': namespace, 'retained_events': len(records),
+            'by_kind': dict(Counter(event['kind'] for event in records)),
+            'flagged_events': sum(bool(event.get('findings')) for event in records),
+            'max_events': service.maximum, 'retention_seconds': service.ttl}
 
 
 @router.get("/graph")
@@ -83,14 +95,73 @@ async def pod_review_context(request: Request, namespace: str, pod: str, limit: 
 
 @router.post('/pods/{namespace}/{pod}/review')
 async def review_selected_pod(request: Request, namespace: str, pod: str, body: PodReviewInput):
-    from agents.summarizer import analyse_document
     document = await pod_review_context(request, namespace, pod, body.event_limit)
     document['operator_question'] = body.question
+    result = await request.app.state.pod_grader.review(document, force=True)
+    return {**result, 'analysis': '\n\n'.join(result.get('reasons', [])) + '\n\nUncertainty: ' + result.get('uncertainty', ''),
+            'event_ids': result.get('evidence_ids', [])}
+
+
+@router.get('/reviews')
+async def reviews(request: Request, namespace: str | None = None):
+    grader = request.app.state.pod_grader
+    return {'worker': grader.health, 'reviews': await grader.records('reviews', namespace)}
+
+
+@router.get('/alerts')
+async def alerts(request: Request, namespace: str | None = None):
+    grader = request.app.state.pod_grader
+    records = await grader.records('alerts', namespace)
+    from backend.app.services.grading import alert_freshness
+    records=[alert_freshness(record,await grader.get('reviews',record['uid'])) if record.get('uid') else record for record in records]
+    return {'alerts': records, 'unread': sum(r['active'] and not r['acknowledged'] for r in records),
+            'worker': grader.health}
+
+
+class AcknowledgeInput(BaseModel):
+    version: int = Field(ge=1)
+
+
+@router.post('/alerts/{uid}/acknowledge')
+async def acknowledge_alert(request: Request, uid: str, body: AcknowledgeInput):
     try:
-        analysis = await asyncio.to_thread(analyse_document, document)
+        result = await request.app.state.pod_grader.acknowledge(uid, body.version)
     except ValueError as exc:
-        raise HTTPException(413, 'The selected evidence exceeds the local model context. Choose fewer observations or configure a larger context.') from exc
-    ids = list(dict.fromkeys(e['id'] for e in document['events'] + document['shared_identity_events']))
-    return {'cluster': document['cluster'], 'namespace': namespace, 'pod': pod,
-            'reviewed_at': datetime.now(timezone.utc).isoformat(), 'analysis': analysis,
-            'event_ids': ids, 'sample': document['sample'], 'scoring_enabled': False, 'remediation_enabled': False}
+        raise HTTPException(409, str(exc)) from exc
+    if result is None:
+        raise HTTPException(404, 'Alert not found or expired')
+    return result
+
+
+@router.get('/pods/{namespace}/{pod}/configuration')
+async def configuration(request: Request, namespace: str, pod: str):
+    from fastapi import HTTPException
+    from kubernetes.client.exceptions import ApiException
+    from backend.app.services.pod_configuration import pod_configuration
+    try:
+        return await asyncio.to_thread(pod_configuration, request.app.state.k8s, namespace, pod)
+    except ApiException as exc:
+        raise HTTPException(status_code=exc.status if exc.status in (403, 404) else 502,
+                            detail='Could not read pod configuration from Kubernetes') from exc
+
+
+class PermissionDecision(BaseModel):
+    decision: Literal['accept','reject']
+    actor: str = Field(min_length=1,max_length=100)
+    note: str = Field(default='',max_length=2000)
+
+@router.get('/permission-proposals')
+async def permission_proposals(request: Request):
+    return {'proposals':await request.app.state.permission_proposals.list()}
+
+@router.get('/permission-proposals/history')
+async def permission_history(request: Request):
+    return {'history':await request.app.state.permission_proposals.history()}
+
+@router.post('/permission-proposals/{identifier}/decision')
+async def permission_decision(request: Request, identifier: str, body: PermissionDecision):
+    from fastapi import HTTPException
+    try:
+        return await request.app.state.permission_proposals.decide(identifier,body.decision,body.actor,body.note)
+    except LookupError as exc:raise HTTPException(404,str(exc)) from exc
+    except ValueError as exc:raise HTTPException(409,str(exc)) from exc

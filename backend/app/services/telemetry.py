@@ -95,8 +95,39 @@ class Telemetry:
                 findings.append("binary_outside_boundary")
         return sorted(set(findings))
 
+    async def archive(self, event):
+        """Retain pod histories independently of the noisy global event list."""
+        namespaces={e.get('namespace') for e in (event.get('source_pod',{}),event.get('destination_pod',{}),event.get('target',{})) if e.get('namespace')}
+        keys=[self.prefix+':history:namespace:'+ns for ns in sorted(namespaces)]
+        # A per-pod index also protects quiet pods sharing a busy namespace.
+        for endpoint in (event.get('source_pod',{}),event.get('destination_pod',{})):
+            if endpoint.get('namespace') and endpoint.get('pod'):
+                keys.append(self.prefix+':history:pod:'+endpoint['namespace']+'/'+endpoint['pod'])
+        target=event.get('target',{})
+        if target.get('resource')=='pods' and target.get('namespace') and target.get('name'):
+            keys.append(self.prefix+':history:pod:'+target['namespace']+'/'+target['name'])
+        keys=sorted(set(keys))
+        if not keys:return
+        script="""
+        if redis.call('EXISTS',KEYS[1]) == 1 then return 0 end
+        redis.call('SET',KEYS[1],'1','EX',ARGV[3])
+        for i=2,#KEYS do
+          redis.call('LPUSH',KEYS[i],ARGV[1])
+          redis.call('LTRIM',KEYS[i],0,tonumber(ARGV[2])-1)
+          redis.call('EXPIRE',KEYS[i],ARGV[3])
+        end
+        return 1
+        """
+        await self.redis.eval(script,len(keys)+1,self.prefix+':history:seen:'+event['id'],*keys,
+                              json.dumps(event),self.maximum,self.ttl)
+
+    async def pod_history(self, namespace, name):
+        values=await self.redis.lrange(self.prefix+':history:pod:'+namespace+'/'+name,0,self.maximum-1)
+        return await asyncio.to_thread(self._filter_events,values,self.maximum,namespace,None)
+
     async def save(self, event):
         event["findings"] = self.findings(event)
+        await self.archive(event)
         # Atomic deduplication and bounded retention, including concurrent collectors.
         script = """
         if redis.call('EXISTS', KEYS[2]) == 1 then return 0 end
@@ -110,20 +141,22 @@ class Telemetry:
 
     async def events(self, limit=100, namespace=None, kind=None):
         values = await self.redis.lrange(self.prefix + ":events", 0, self.maximum - 1)
+        return await asyncio.to_thread(self._filter_events, values, limit, namespace, kind)
+
+    def _filter_events(self, values, limit, namespace, kind):
         cutoff = datetime.now(timezone.utc).timestamp() - self.ttl
         result = []
         for value in values:
             event = json.loads(value)
             if datetime.fromisoformat(event["observed_at"]).timestamp() < cutoff:
                 continue
-            if namespace and namespace not in (event.get("source_pod", {}).get("namespace"), event.get("destination_pod", {}).get("namespace")):
+            if namespace and namespace not in (event.get("source_pod", {}).get("namespace"), event.get("destination_pod", {}).get("namespace"), event.get('target', {}).get('namespace')):
                 continue
             if kind and event["kind"] != kind:
                 continue
             result.append(event)
-            if len(result) >= limit:
-                break
-        return result
+        result.sort(key=lambda e:e.get("timestamp") or e["observed_at"],reverse=True)
+        return result[:limit]
 
     async def graph(self, limit=1000, namespace=None):
         nodes, edges = {}, {}
@@ -139,8 +172,22 @@ class Telemetry:
             edge["flow_records"] += 1
             edge["http_requests"] += int(bool(event.get("http")) and event.get("l7_type") == "REQUEST")
             edge["drops"] += int(event.get("verdict") == "DROPPED")
+        snapshot = json.loads(await self.redis.get(self.prefix + ':inventory') or '{}')
+        for pod in snapshot.get('pods', []):
+            if namespace and pod['namespace'] != namespace:
+                continue
+            identity = f"{self.cluster}/{pod['namespace']}/{pod['pod']}"
+            nodes.setdefault(identity, {'id': identity, 'namespace': pod['namespace'], 'pod': pod['pod'],
+                                        'ip': pod.get('pod_ip'), 'last_seen': snapshot.get('observed_at')})
+            if pod.get('node'):
+                node_id = self.cluster + '/node/' + pod['node']
+                nodes.setdefault(node_id, {'id': node_id, 'namespace': '', 'pod': '', 'ip': pod['node'],
+                                           'kind': 'node', 'last_seen': snapshot.get('observed_at')})
+                edges[(identity, node_id, 'scheduled_on')] = {'source': identity, 'target': node_id,
+                    'kind': 'topology', 'relationship': 'Scheduled on node',
+                    'flow_records': 0, 'http_requests': 0, 'drops': 0}
         return {"nodes": list(nodes.values()), "edges": list(edges.values()), "sample_limit": limit,
-                "note": "Observed flow records; multiple observation points may describe the same connection."}
+                "note": "Solid links show observed flows; dashed links show pod scheduling from inventory, not network traffic."}
 
     async def follow(self, source, filename):
         """Follow mounted JSONL exports; persist byte offsets, retry rotation/errors."""

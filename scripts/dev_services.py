@@ -75,6 +75,9 @@ def main():
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     load_dotenv(repo / '.env')
+    os.environ.setdefault('POD_REVIEW_ENABLED', 'true')
+    os.environ.setdefault('POD_REVIEW_INTERVAL', '120')
+    os.environ.setdefault('POD_INVENTORY_INTERVAL', '10')
     os.chdir(repo)
     directory = args.log_dir.resolve()
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -95,7 +98,7 @@ def main():
     specs = [
         ('hubble-forward', kubectl + ['port-forward', 'svc/hubble-relay', '4245:80'], None),
         ('audit-export', ['docker', 'exec', args.profile, 'tail', '-n', '+1', '-F', '/var/log/guardian-e2e-audit/audit.log'], export_path('POD_AUDIT_EXPORT_PATH')),
-        ('tetragon-export', kubectl + ['logs', '-l', 'app.kubernetes.io/name=tetragon', '-c', 'export-stdout', '--follow', '--tail=0', '--max-log-requests=100'], export_path('TETRAGON_EXPORT_PATH')),
+        ('tetragon-export', kubectl + ['logs', '-l', 'app.kubernetes.io/name=tetragon', '-c', 'export-stdout', '--follow', '--since=30s', '--max-log-requests=100'], export_path('TETRAGON_EXPORT_PATH')),
         ('hubble-export', ['hubble', 'observe', '--server', 'localhost:4245', '--follow', '--output', 'json'], export_path('HUBBLE_EXPORT_PATH')),
         ('backend', [python, '-m', 'uvicorn', 'backend.app.main:app', '--host', '127.0.0.1', '--port', '8000'], None),
         ('frontend', [python, '-m', 'streamlit', 'run', 'frontend/main.py', '--server.address', '127.0.0.1', '--server.port', '8501', '--server.headless', 'true', '--browser.gatherUsageStats', 'false'], None),

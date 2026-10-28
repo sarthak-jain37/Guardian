@@ -33,6 +33,7 @@ class TelemetryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_graph_filters_and_counts(self):
         redis = AsyncMock()
+        redis.get.return_value = None
         event = normalize(flow(), "hubble", "c1")
         redis.lrange.return_value = [json.dumps(event)]
         service = Telemetry(redis)
@@ -44,13 +45,16 @@ class TelemetryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_save_uses_atomic_dedup(self):
         redis = AsyncMock()
+        redis.get.return_value = None
         service = Telemetry(redis)
         await service.save(normalize(flow(), "hubble", "c1"))
-        redis.eval.assert_awaited_once()
+        self.assertEqual(redis.eval.await_count,2)
+        self.assertIn(":history:pod:",str(redis.eval.await_args_list[0]))
         self.assertEqual(redis.eval.call_args.args[1], 2)
 
     async def test_follower_waits_for_complete_lines(self):
         redis = AsyncMock()
+        redis.get.return_value = None
         redis.get.return_value = None
         service = Telemetry(redis)
         service.save = AsyncMock()
@@ -69,6 +73,7 @@ class TelemetryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_graph_keeps_newest_observed_ip(self):
         redis = AsyncMock()
+        redis.get.return_value = None
         latest = flow()
         latest['flow']['IP'] = {'source': '10.0.0.2', 'destination': '10.0.0.3'}
         previous = flow()

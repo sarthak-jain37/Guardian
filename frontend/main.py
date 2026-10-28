@@ -1,4 +1,5 @@
 import html
+import time
 import json
 from pathlib import Path
 import sys
@@ -10,10 +11,20 @@ sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
 import requests
 import streamlit as st
 from backend.app.core.config import BACKEND_URL
-from backend.app.services.pod_review import permission_points, event_summary, SIGNALS
+from backend.app.services.pod_review import permission_points, event_summary, event_result, SIGNALS
 from frontend.graph_view import render_graph
 
 st.set_page_config(page_title='Guardian · Cluster observability',page_icon='🛡️',layout='wide',initial_sidebar_state='collapsed')
+# Refresh the whole page, including inventory and active pod details. Collection
+# and model analysis run in the backend even without an open browser session.
+st.session_state['_last_ui_render'] = time.monotonic()
+@st.fragment(run_every='10s')
+def refresh_dashboard():
+    st.caption('Live monitoring · Page updates every 10 seconds · Collection and model reviews continue in the background.')
+    if time.monotonic() - st.session_state['_last_ui_render'] >= 9:
+        st.rerun(scope='app')
+refresh_dashboard()
+
 st.markdown('''<style>
 .block-container{max-width:1480px;padding-top:2rem;padding-bottom:3rem}h1{font-size:2.1rem!important;letter-spacing:-.04em}h2{font-size:1.35rem!important;letter-spacing:-.02em}h3{font-size:1.1rem!important}.brand{font-size:12px;font-weight:650;letter-spacing:.16em;color:#7d9bb8;margin-bottom:12px}.muted{color:#8fa7bf}.pod-title{font-size:22px;font-weight:600;letter-spacing:-.025em}.eyebrow{font-size:11px;letter-spacing:.13em;color:#8ea7c0;text-transform:uppercase}.chip{display:inline-block;padding:4px 10px;border-radius:20px;background:rgba(85,169,144,.14);color:#72d7b8;font-size:12px;margin-right:5px}.chip.warn{background:rgba(224,168,84,.13);color:#e8bc77}[data-testid="stMetric"]{border:1px solid rgba(125,155,184,.2);border-radius:12px;padding:16px 19px;background:rgba(125,155,184,.035)}[data-testid="stMetricValue"]{font-size:1.8rem}div[data-testid="stVerticalBlockBorderWrapper"]>div{border-color:rgba(125,155,184,.2)}.stButton>button{border-radius:8px}[data-testid="stHeader"]{background:transparent}a{text-decoration:none}
 </style>''',unsafe_allow_html=True)
@@ -66,13 +77,49 @@ def active_pod():
     return choices[chosen]
 
 
+def readable_activity(event):
+    kind=event.get('kind','')
+    if kind=='pod_configuration_change':
+        names={'container_statuses':'container health, readiness or restart status',
+               'containers':'container image or settings','permissions':'service account permissions',
+               'volumes':'attached storage','security_context':'security settings',
+               'host_network':'host network setting','host_pid':'host process visibility',
+               'host_ipc':'host IPC setting'}
+        return 'Pod update: '+', '.join(names.get(k,k.replace('_',' ')) for k in event.get('changes',{}))
+    if event.get('dns'):
+        return 'Looked up the IP address for '+str(event['dns'].get('query','an unknown name'))
+    if event.get('http'):
+        http=event['http'];method=http.get('method','')
+        action='Requested a web resource' if method=='GET' else 'Sent an HTTP '+method+' request'
+        return action+': '+str(http.get('host') or '')+str(http.get('path') or '')
+    if kind=='network':
+        dest=event.get('destination_pod',{})
+        return 'Network traffic to '+str(dest.get('pod') or dest.get('ip') or 'an unknown destination')
+    return event_summary(event)
+
+
+def readable_result(event):
+    raw=event_result(event)
+    return {'FORWARDED':'Allowed by the network', 'DROPPED':'Blocked or dropped by the network',
+            'REDIRECTED':'Sent through a proxy for further handling', 'REJECTED':'Rejected',
+            'success':'API request succeeded', 'denied':'API access denied',
+            'other_or_unknown':'Outcome unknown', 'Change observed':'Update detected',
+            'Execution observed':'Program execution detected', 'Outcome not captured':'Outcome unknown'}.get(raw,raw)
+
+
 def event_table(events,key):
     if not events:
         st.info('No matching observations in the retained sample.');return
-    rows=[{'When':timestamp(e.get('timestamp') or e.get('observed_at')),'Pod':e.get('source_pod',{}).get('pod') or 'Shared identity','Activity':event_summary(e),'Source':e.get('source',''),'Result':e.get('outcome') or e.get('verdict') or '', 'Evidence ID':e['id'][:12]} for e in events]
+    rows=[{'When':timestamp(e.get('timestamp') or e.get('observed_at')),'Pod':e.get('source_pod',{}).get('pod') or 'Caller pod unknown','What happened':readable_activity(e),'Who did it':e.get('actor') or e.get('source_pod',{}).get('pod') or 'Not recorded','Pod instance':{'current':'Current UID','other':'Different UID','name_only':'Name only; UID not captured'}.get(e.get('instance_match'),'—'),'Collected by':{'hubble':'Hubble · network','tetragon':'Tetragon · runtime','audit':'Kubernetes audit log','inventory':'Pod settings and status check'}.get(e.get('source'),e.get('source','')),'Outcome':readable_result(e)} for e in events]
     st.dataframe(rows,hide_index=True,width='stretch')
-    with st.expander('Inspect an observation'):
-        chosen=st.selectbox('Observation',list(range(len(events))),format_func=lambda i:rows[i]['When']+' · '+rows[i]['Activity'],key=key+'_event')
+    st.caption('Outcome means what the collector observed. Allowed traffic does not guarantee the destination received it or the application request succeeded.')
+    with st.expander('What do these terms mean?'):
+        st.markdown('**Allowed:** the network permitted the traffic. **Blocked/dropped:** traffic was stopped at the observation point. **Redirected:** traffic was sent through a proxy for inspection or routing; this is not automatically a failure. **Rejected:** a request was explicitly refused.')
+        st.markdown('**Pod configuration** means its settings, such as image, permissions, storage and security options. **Container status** means its current condition, such as running, ready, restarting or stopped. A status update does not necessarily mean someone edited its settings.')
+        st.markdown('**Outcome unknown:** the event was captured, but its final result was not. **Evidence ID:** a reference to the original event, available in the technical details below.')
+    with st.expander('Inspect an observation · technical details'):
+
+        chosen=st.selectbox('Observation',list(range(len(events))),format_func=lambda i:rows[i]['When']+' · '+rows[i]['What happened'],key=key+'_event')
         event=events[chosen]
         st.caption('Evidence ID: '+event['id'])
         for flag in event.get('findings',[]):st.write('• '+SIGNALS.get(flag,flag.replace('_',' ').capitalize()))
@@ -101,10 +148,150 @@ def permission_view(identity):
         st.dataframe(rows,hide_index=True,width='stretch')
 
 
+def assessment_view(result):
+    state=result.get('status','pending')
+    severity=result.get('severity')
+    if state=='error':
+        st.error('Review error: the local model did not produce a valid assessment. No grade was assigned.')
+    elif state=='insufficient_evidence':
+        st.info('Insufficient evidence — no severity grade assigned.')
+    elif state=='superseded':
+        st.warning('This pod instance changed during review. Await a review of its current UID.')
+    elif severity is not None:
+        st.metric('Model-assessed severity',str(severity)+' / 10')
+    st.caption('Assessed '+timestamp(result.get('reviewed_at'))+' · Pod UID: '+str(result.get('uid','unknown'))+' · Advisory model assessment requiring verification')
+    history=result.get('history_summary',{})
+    if history:
+        st.write('**Recorded activity across retained history**')
+        st.write(str(history.get('attributed_observations',0))+' observations · '+str(history.get('first_event') or 'No start time')+' to '+str(history.get('last_event') or 'No end time'))
+        for action,count in history.get('api_actions',{}).items():st.write('• '+str(count)+' API observations: '+action)
+        for outcome,count in history.get('network_outcomes',{}).items():st.write('• '+str(count)+' network observations: '+outcome)
+        for binary,count in history.get('processes',{}).items():st.write('• '+str(count)+' runtime observations involving '+binary)
+        st.caption('These are observation counts, not necessarily distinct requests or executions. History is limited by retention; lifecycle actions by other callers are kept separate.')
+    st.write('**Activity explanation**')
+    for reason in result.get('reasons',[]):st.text('• '+reason)
+    st.text('Uncertainty: '+result.get('uncertainty','Not reported'))
+    if result.get('next_checks'):
+        st.write('**Recommended human checks**')
+        for check in result['next_checks']:st.text('• '+check)
+    if result.get('next_review_due_at'):st.caption('Next review due: '+timestamp(result['next_review_due_at']))
+    with st.expander('Retained history used for this assessment'):
+        st.json(result.get('history_summary',{}),expanded=True)
+    with st.expander('Cited evidence and collection coverage'):
+        st.write(result.get('evidence_ids',[]))
+        st.json({'attributed_evidence': result.get('evidence',[]), 'shared_identity_evidence': result.get('shared_identity_evidence',[])},expanded=False)
+        st.json({'sample':result.get('sample'), 'coverage':result.get('coverage')},expanded=False)
+    st.caption('0–2 low concern in the sample · 3–4 needs checking · 5–6 concerning · 7–8 dangerous · 9–10 critical. A low grade does not prove safety. No automated remediation.')
+
+
+@st.fragment(run_every='10s')
+def continuous_assessment(uid):
+    data=api('/telemetry/reviews')
+    worker=data['worker']
+    st.caption('Continuous review: '+worker.get('state','unknown')+' · Each pod is scheduled every '+str(worker['interval_seconds'])+' seconds. '+str(worker.get('overdue_pods',0))+' overdue; '+str(worker.get('queued_pods',0))+' queued.'+(' Reviewing '+str(worker['current_pod']) if worker.get('current_pod') else ''))
+    result=next((r for r in data['reviews'] if r['uid']==uid),None)
+    if result:
+        assessment_view(result)
+        alerts=api('/telemetry/alerts').get('alerts',[])
+        previous=next((a for a in alerts if a.get('uid')==uid and a.get('historical') and a.get('active')),None)
+        if previous:st.warning('Unresolved previous warning: '+str(previous['severity'])+'/10 assessed '+timestamp(previous['reviewed_at'])+'. This historical score is not the current review result.')
+    else:st.info('Awaiting the first background assessment of this pod. CPU model reviews run one at a time.')
+
+
+def permission_proposal_view(proposal):
+    with st.expander('Permission proposal · '+proposal['status']+' · '+proposal['namespace']+'/'+proposal['pod'],expanded=proposal['status']=='pending'):
+        st.write(proposal.get('explanation',''))
+        if proposal.get('affected_pods'):st.warning('Affected pods sharing the service account: '+', '.join(proposal['affected_pods']))
+        for limitation in proposal.get('limitations',[]):st.caption(limitation)
+        for change in proposal.get('changes',[]):
+            st.write('**'+change['kind']+'/'+change['name']+'**')
+            left,right=st.columns(2)
+            with left:st.caption('Current configuration at proposal time');st.json(change['before'],expanded=False)
+            with right:st.caption('Proposed configuration');st.json(change['after'],expanded=False)
+        if proposal['status']=='pending':
+            st.warning('Accepting applies these permission reductions to the cluster. Workloads can stop working if they need the removed permissions.')
+            with st.form('permission_decision_'+proposal['id']):
+                actor=st.text_input('Record decision under your name',key='actor_'+proposal['id'])
+                note=st.text_area('Decision note',key='note_'+proposal['id'])
+                accept=st.form_submit_button('Accept and apply reductions',type='primary')
+                reject=st.form_submit_button('Reject proposal')
+                if accept or reject:
+                    if not actor.strip():st.error('Enter a name for the decision log.')
+                    else:
+                        try:
+                            response=requests.post(BACKEND_URL+'/telemetry/permission-proposals/'+quote(proposal['id'],safe='')+'/decision',json={'decision':'accept' if accept else 'reject','actor':actor.strip(),'note':note},timeout=120)
+                            response.raise_for_status()
+                            outcome=response.json()
+                            st.session_state['permission_decision_receipt']=outcome
+                            st.cache_data.clear();st.rerun()
+                        except (requests.RequestException,ValueError) as exc:st.error('Decision failed: '+str(exc)+'. Inspect the decision history before retrying.')
+        if proposal.get('error'):st.error(proposal['error'])
+        if proposal.get('receipt'):
+            with st.expander('Execution receipt'):st.json(proposal['receipt'])
+
+
+def alerts_page():
+    st.title('Pod alerts')
+    st.write('Persistent local-model assessments. Acknowledgement marks an alert read; it does not revoke permissions or establish that the pod is safe.')
+    @st.fragment(run_every='10s')
+    def contents():
+        data=api('/telemetry/alerts')
+        st.caption('Alerts cover all namespaces so critical pods are always visible.')
+        st.caption('Alert threshold: '+str(data['worker']['alert_threshold'])+'/10 · Notifications refresh every 10 seconds while this dashboard is open.')
+        records=data['alerts']
+        proposals=api('/telemetry/permission-proposals').get('proposals',[])
+        critical=[a for a in records if a.get('active') and not a.get('historical') and a.get('severity',0)>8 and a.get('critical_confirmed')]
+        if critical:st.error('CRITICAL · '+str(len(critical))+' pod(s) scored 9–10/10 after corroboration and a second model check. Review the permission proposals below.')
+        if not records:st.info('No alerts have been recorded for this namespace. Check the Reviews below for pending assessments or errors.')
+        for alert in sorted(records,key=lambda a:(a['active'],not a['acknowledged'],a['severity']),reverse=True):
+            with st.container(border=True):
+                if alert.get('severity',0)>8 and alert.get('critical_confirmed') and not alert.get('historical'):st.error('CRITICAL · '+alert['namespace']+'/'+alert['pod']+' · '+str(alert['severity'])+'/10')
+                else:st.subheader(alert['namespace']+'/'+alert['pod'])
+                st.write(('Unresolved historical warning — previous score '+str(alert['severity'])+'/10' if alert.get('historical') else 'Active — needs investigation' if alert['active'] else 'Latest valid assessment is below the alert threshold')+' · '+('Acknowledged' if alert['acknowledged'] else ('Unread' if alert['active'] else 'Unacknowledged history')))
+                current=next((p for p in all_pods if p.get('uid')==alert['uid']),None)
+                if current is None:st.caption('Historical pod instance; this UID is absent from the current inventory.')
+                if alert.get('historical'):
+                    latest=alert.get('latest_review')
+                    st.warning(str(alert.get('history_reason'))+'. The previous score below is not a current assessment.')
+                    if latest:
+                        st.caption('Latest review: '+timestamp(latest['reviewed_at'])+' · '+latest['status'].replace('_',' '))
+                        assessment_view(latest)
+                    else:st.info('Current assessment unavailable.')
+                    with st.expander('Previous warning · '+timestamp(alert['reviewed_at'])+' · '+str(alert['severity'])+'/10'):
+                        if alert.get('assessment_version')!=2:st.caption('Legacy model output; not revalidated by the current review pipeline.')
+                        assessment_view(alert)
+                else:assessment_view(alert)
+                url='/pod?'+urlencode({'namespace':alert['namespace'],'pod':alert['pod']})
+                st.markdown('[Open pod workspace]('+url+')')
+                for proposal in proposals:
+                    if proposal['uid']==alert['uid']:permission_proposal_view(proposal)
+                if not alert['acknowledged'] and st.button('Acknowledge',key='ack_'+alert['id']):
+                    response=requests.post(BACKEND_URL+'/telemetry/alerts/'+quote(alert['id'],safe='')+'/acknowledge',json={'version':alert['version']},timeout=15)
+                    if response.ok:st.cache_data.clear();st.rerun()
+                    else:st.error('Alert changed or acknowledgement failed. Refresh and try again.')
+        with st.expander('Permission decisions and execution log'):
+            history=api('/telemetry/permission-proposals/history').get('history',[])
+            if history:
+                st.dataframe([{'When':timestamp(h['timestamp']),'Proposal':h['proposal_id'],'Event':h['event'],'Actor':h['details'].get('actor',''),'Decision':h['details'].get('decision',''),'Status':h['details'].get('status',''),'Note':h['details'].get('note','')} for h in history],hide_index=True,width='stretch')
+                st.json(history,expanded=False)
+            else:st.info('No permission decisions yet.')
+        if st.session_state.get('permission_decision_receipt'):
+            receipt=st.session_state['permission_decision_receipt']
+            st.info('Last permission decision: '+receipt['status']+(' · '+receipt.get('error','') if receipt.get('error') else ''))
+        st.subheader('Continuous pod reviews')
+        reviews=api('/telemetry/reviews',ns_params())
+        st.json(reviews['worker'],expanded=False)
+        st.dataframe([{'Pod':r['namespace']+'/'+r['pod'],'Status':r['status'],'Severity /10':r.get('severity'),'Assessed':timestamp(r['reviewed_at']),'UID':r['uid']} for r in reviews['reviews']],hide_index=True,width='stretch')
+    contents()
+
+
 def review_panel(identity):
     ns,pod=identity['namespace'],identity['pod']
     path='/telemetry/pods/'+quote(ns,safe='')+'/'+quote(pod,safe='')
-    st.subheader('Review this pod with the local model')
+    st.subheader('Continuous severity assessment')
+    continuous_assessment(identity.get('uid'))
+    st.caption('Automatic analysis runs without clicking Analyze. The optional controls below request an extra review.')
+    st.subheader('Optional additional review')
     st.write('Ask about this pod’s behavior. The review combines its permissions, distinct observed actions, configured boundaries and collection gaps.')
     question=st.text_area('What do you want to understand?',value='Assess whether this pod needs investigation. Explain what the evidence proves and what remains uncertain.',height=90,key='question_'+ns+'/'+pod)
     count=st.select_slider('Evidence records to sample',options=[3,5,8,12,20,30],value=8,key='review_limit_'+ns+'/'+pod)
@@ -127,64 +314,64 @@ def review_panel(identity):
         except requests.RequestException as exc:st.error('The local model did not complete: '+str(exc))
     result=st.session_state.get('review_'+ns+'/'+pod)
     if result:
-        st.subheader('Model interpretation')
-        st.caption('Reviewed '+timestamp(result.get('reviewed_at'))+' · '+str(len(result.get('event_ids',[])))+' evidence IDs · local advisory analysis')
-        analysis=result.get('analysis','')
-        supplied=result.get('event_ids',[])
-        cited=[event_id for event_id in supplied if event_id in analysis or event_id[:12] in analysis]
-        if supplied and not cited:
-            st.warning('The model did not cite the supplied evidence IDs. Treat these claims as unverified and compare them with the observations below.')
-        # Render model text without remote image embeds or executable HTML.
-        import re
-        analysis=re.sub(r'!\[[^\]]*\]\([^)]*\)','[image omitted]',analysis)
-        st.markdown(analysis)
-        with st.expander('Supporting evidence IDs'):st.write(result.get('event_ids',[]))
-        st.caption('Check the cited evidence before acting. Model interpretation does not establish compromise.')
+        st.subheader('Requested assessment')
+        assessment_view(result)
 
 
 def overview():
-    st.title('Your cluster at a glance')
-    st.write('Understand what workloads can do, what they have done, and where the evidence needs attention.')
-    events=api('/telemetry/events',ns_params(limit=1000))['events']
-    visible=[p for p in all_pods if not namespace or p['namespace']==namespace]
-    flagged=[e for e in events if e.get('findings')]
-    a,b,c,d=st.columns(4)
-    a.metric('Pods',len(visible));b.metric('Network flows',sum(e['kind']=='network' for e in events));c.metric('API actions',sum(e['kind']=='kubernetes_audit' for e in events));d.metric('Flagged events',len(flagged))
-    st.caption('Activity counts describe the latest 1,000 retained records in the selected namespace. They are not risk scores.')
-    left,right=st.columns([1.5,1])
-    with left:
-        st.subheader('Workloads to inspect')
-        pod_counts=Counter((e.get('source_pod',{}).get('namespace'),e.get('source_pod',{}).get('pod')) for e in flagged)
-        ordered=sorted(visible,key=lambda p:pod_counts[(p['namespace'],p['pod'])],reverse=True)
-        for pod in ordered[:8]:
-            with st.container(border=True):
-                name,action=st.columns([2,1])
-                name.markdown('**'+pod['pod']+'**')
-                name.caption(pod['namespace']+' · '+str(pod.get('phase') or 'Unknown')+' · '+str(pod_counts[(pod['namespace'],pod['pod'])])+' flagged observations')
-                if action.button('Open pod',key='open_'+pod['namespace']+'/'+pod['pod']):go_pod(pod)
-    with right:
-        st.subheader('What needs attention')
-        counts=Counter(f for e in flagged for f in e.get('findings',[]))
-        for flag,count in counts.most_common(7):
-            st.write('**'+str(count)+' observations** · '+SIGNALS.get(flag,flag.replace('_',' ').capitalize()))
-        if not counts:st.info('No flags in this sample. Check collection coverage before drawing a conclusion.')
-        st.subheader('Collection coverage')
-        for source,state in status.get('collectors',{}).items():
-            state_name=state.get('state','unknown')
-            st.write(('🟢 ' if state_name in ('ready','following') else '🟠 ')+source.title()+' · '+state_name)
-            if state.get('error'):st.caption(state['error'])
-        st.caption('Inventory snapshot: '+timestamp(inventory.get('observed_at')))
+    st.title('All pods')
+    st.caption('Open a pod to inspect its live configuration, access grants and related resources.')
+    pods=all_pods
+    st.caption('Showing every namespace. The namespace filter applies to the other pages.')
+    st.caption(str(len(pods))+' pods · Inventory snapshot: '+timestamp(inventory.get('observed_at')))
+    if not pods:
+        st.info('No pods found in the cluster inventory.')
+    for identity in sorted(pods,key=lambda p:(p['namespace'],p['pod'])):
+        ns,name=identity['namespace'],identity['pod']
+        card_key='configuration_'+str(identity.get('uid') or ns+'/'+name)
+        opened=st.session_state.get(card_key,False)
+        label=('▾ ' if opened else '▸ ')+ns+' / '+name+' · '+str(identity.get('phase') or 'Unknown')
+        label+='  ·  Node: '+str(identity.get('node') or 'Pending')+'  ·  Service account: '+identity.get('service_account_name','default')
+        with st.container(border=True):
+            if st.button(label,key='card_'+card_key,width='stretch',type='primary' if opened else 'secondary',help='Click anywhere on this card header to show or hide configuration'):
+                st.session_state[card_key]=not opened
+                st.rerun()
+            if opened:
+                path='/telemetry/pods/'+quote(ns,safe='')+'/'+quote(name,safe='')+'/configuration'
+                try:
+                    details=fetch(path)
+                except (requests.RequestException,ValueError) as exc:
+                    st.error('Could not load this pod configuration: '+str(exc))
+                    continue
+                for warning in details.get('warnings',[]):st.warning(warning)
+                tabs=st.tabs(['Pod configuration','Roles','Role bindings','Deployments and owners','Services'])
+                with tabs[0]:st.json(details['pod'],expanded=True)
+                for tab,key,empty in [(tabs[1],'roles','No bound roles found.'),(tabs[2],'bindings','No role bindings found.'),(tabs[3],'workloads','No supported workload owner found; this may be a standalone pod.'),(tabs[4],'services','No services select this pod.')]:
+                    with tab:
+                        if not details[key]:st.info(empty)
+                        for obj in details[key]:
+                            st.write('**'+obj.get('kind',key.title())+' / '+obj['metadata']['name']+'**')
+                            st.json(obj,expanded=True)
+                if details['permissions'].get('unresolved_bindings'):
+                    st.warning('Some referenced roles could not be resolved.')
 
 
 def connections():
     st.title('Pod connections')
-    st.write('Explore observed communication. Select a node or link for details; open a pod workspace directly from the graph.')
+    st.write('Explore observed network traffic and pod-to-node relationships. Dashed links show scheduling; solid links show recorded traffic.')
+    connection_view=st.radio('Connection type',['Both','Hubble traffic','Pod-to-node relationships'],horizontal=True,key='connection_type')
+    st.caption({'Both':'Solid links: observed Hubble traffic. Dashed links: scheduling relationships from Kubernetes inventory.','Hubble traffic':'Only network connections recorded by Hubble. Pods without recorded traffic are hidden.','Pod-to-node relationships':'Only pod scheduling relationships from Kubernetes inventory. These links do not represent network traffic.'}[connection_view])
     controls=st.columns([1,2])
     limit=controls[0].selectbox('Network sample', [500,1000,2500,5000],index=1)
-    live=controls[1].toggle('Refresh every 10 seconds',value=False)
+    live=controls[1].toggle('Refresh every 10 seconds',value=True)
     @st.fragment(run_every='10s' if live else None)
     def graph_fragment():
-        graph=api('/telemetry/graph',ns_params(limit=limit))
+        graph=api('/telemetry/graph',{'limit':limit})
+        if connection_view!='Both':
+            topology=connection_view=='Pod-to-node relationships'
+            selected_edges=[e for e in graph['edges'] if (e.get('kind')=='topology')==topology]
+            visible_ids={e[k] for e in selected_edges for k in ('source','target')}
+            graph={**graph,'edges':selected_edges,'nodes':[n for n in graph['nodes'] if n['id'] in visible_ids]}
         a,b,c=st.columns(3);a.metric('Endpoints',len(graph['nodes']));b.metric('Directed links',len(graph['edges']));c.metric('Drop observations',sum(e['drops'] for e in graph['edges']))
         render_graph(graph)
     graph_fragment()
@@ -211,11 +398,17 @@ def pod_workspace():
         st.subheader('Recent activity');event_table(events[:20],'pod_summary')
         shared=record.get('shared_identity_audit_events',[])
         if shared:st.warning(str(len(shared))+' sampled audit events use the same service account but cannot be confidently attributed to this pod.')
+        st.subheader('Actions affecting this pod · including creation and deletion')
+        st.caption('Requests made by users and controllers about this pod. History includes previous instances with the same namespace and name. It is separate from actions performed by this pod; a name-only match does not identify a specific instance.')
+        event_table(record.get('actions_affecting_pod',[]),'pod_lifecycle')
     with tabs[1]:render_graph(api('/telemetry/graph',{'namespace':ns,'limit':2500}),focus=(ns,pod))
     with tabs[2]:permission_view(identity)
-    with tabs[3]:event_table([e for e in events if e['kind'].startswith('process_')],'runtime')
+    with tabs[3]:
+        st.caption('Execution observed confirms a process event. Exit status describes process termination; kernel return values depend on the traced function. Outcome not captured means no return result was recorded.')
+        event_table([e for e in events if e['kind'].startswith('process_')],'runtime')
     with tabs[4]:
         st.subheader('Actions attributed to this pod’s credentials');event_table([e for e in events if e['kind']=='kubernetes_audit'],'api_actions')
+        st.subheader('Actions by users and controllers affecting this pod');event_table(record.get('actions_affecting_pod',[]),'api_target_actions')
         with st.expander('Shared service-account activity with uncertain pod attribution'):event_table(record.get('shared_identity_audit_events',[]),'shared_api')
     with tabs[5]:event_table([e for e in events if e.get('http') or e.get('dns')],'http_dns')
     with tabs[6]:
@@ -432,10 +625,10 @@ default_index=namespaces.index('guardian-demo') if 'guardian-demo' in namespaces
 chosen_namespace=bar2.selectbox('Namespace',namespaces,index=default_index,key='global_namespace')
 namespace=None if chosen_namespace=='All namespaces' else chosen_namespace
 if bar3.button('Refresh data',width='stretch'):st.cache_data.clear();st.rerun()
-nav_pages=[st.Page(overview,title='Overview',url_path='overview',default=True),st.Page(connections,title='Connections',url_path='connections')]
+nav_pages=[st.Page(overview,title='All pods',url_path='overview',default=True),st.Page(connections,title='Connections',url_path='connections')]
 pod_page=st.Page(pod_workspace,title='Pod workspace',url_path='pod')
 approval_page=st.Page(approval_queue_page,title='Approval queue',url_path='approval')
-nav_pages.extend([pod_page,approval_page,st.Page(permissions_page,title='Permissions',url_path='permissions'),st.Page(evidence_page,title='Evidence',url_path='evidence'),st.Page(llm_page,title='LLM review',url_path='review')])
+nav_pages.extend([pod_page,approval_page,st.Page(permissions_page,title='Permissions',url_path='permissions'),st.Page(evidence_page,title='Evidence',url_path='evidence'),st.Page(llm_page,title='LLM review',url_path='review'),st.Page(alerts_page,title='Alerts',url_path='alerts')])
 current_page=st.navigation(nav_pages,position='hidden')
 links=[]
 for item in nav_pages:
@@ -444,4 +637,3 @@ for item in nav_pages:
     links.append('<a href="'+href+'" target="_self"'+selected+'>'+html.escape(item.title)+'</a>')
 st.markdown('<style>.guardian-nav{display:flex;gap:6px;flex-wrap:wrap;padding:12px 0 18px;border-bottom:1px solid #24344c;margin-bottom:22px}.guardian-nav a{color:#a9bdd2!important;padding:9px 12px;border-radius:7px;font-size:14px;text-decoration:none}.guardian-nav a:hover{background:#17283c}.guardian-nav a.active{background:#203a56;color:#eaf4ff!important;font-weight:600}</style><nav class="guardian-nav" aria-label="Guardian features">'+''.join(links)+'</nav>',unsafe_allow_html=True)
 current_page.run()
-

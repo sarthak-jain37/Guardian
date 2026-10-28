@@ -77,7 +77,7 @@ def inventory_pod(pod, state):
 
 
 async def refresh_inventory(service, k8s):
-    interval = max(15, int(os.getenv('POD_INVENTORY_INTERVAL', '60')))
+    interval = max(5, int(os.getenv('POD_INVENTORY_INTERVAL', '10')))
     while True:
         try:
             def read():
@@ -120,12 +120,21 @@ async def pod_evidence(service, namespace=None, pod=None, limit=100):
     if pod:
         pods = [p for p in pods if p['pod'] == pod]
     events = await service.events(service.maximum, namespace)
+    if pod and hasattr(service,'pod_history'):
+        history=await service.pod_history(namespace,pod)
+        if isinstance(history,list):
+            events=list({e['id']:e for e in events+history}.values())
+            events.sort(key=lambda e:e.get('timestamp') or e.get('observed_at') or '',reverse=True)
     result = []
     for identity in pods:
-        direct, shared = [], []
+        direct, shared, affected = [], [], []
         for event in events:
             source = event.get('source_pod', {})
             if event['kind'] == 'kubernetes_audit':
+                target = event.get('target', {})
+                if target.get('resource') == 'pods' and target.get('namespace') == identity['namespace'] and target.get('name') == identity['pod']:
+                    affected.append({**event, 'relationship': 'action_affecting_pod',
+                                     'instance_match': 'current' if target.get('uid') == identity['uid'] else 'other' if target.get('uid') else 'name_only'})
                 if event.get('actor') != identity['permissions']['service_account']:
                     continue
                 token_uid = event.get('token_pod_uid')
@@ -137,7 +146,7 @@ async def pod_evidence(service, namespace=None, pod=None, limit=100):
                 # Runtime UID, if supplied, prevents attribution across recreated pods.
                 if not source.get('uid') or source['uid'] == identity['uid']:
                     direct.append(event)
-        result.append({'identity': identity, 'events': direct[:limit], 'shared_identity_audit_events': shared[:limit],
+        result.append({'identity': identity, 'events': direct[:limit], 'shared_identity_audit_events': shared[:limit], 'actions_affecting_pod': affected[:limit],
                        'attribution_note': 'Token pod UID identifies the credential binding, not proof of the physical caller; name-only runtime correlation can include recreated pods.'})
     return {'inventory_observed_at': snapshot.get('observed_at'), 'coverage': service.health,
-            'pods': result, 'event_limit_per_pod': limit, 'scoring_enabled': False, 'remediation_enabled': False}
+            'pods': result, 'event_limit_per_pod': limit, 'scoring_enabled': True, 'remediation_enabled': False}

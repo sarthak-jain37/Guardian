@@ -1,0 +1,23 @@
+[Unit]
+Description=Guardian continuous collectors, API, dashboard and model reviews
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/saket-ubuntu/Guardian
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=KUBECONFIG=/home/saket-ubuntu/Documents/ChatGPT/Guardian/output/testing/minikube-run/kubeconfig
+Environment=POD_REVIEW_ENABLED=true
+Environment=POD_REVIEW_INTERVAL=120
+Environment=LLM_THREADS=4
+Environment=LLM_GRADE_MAX_TOKENS=384
+Environment=POD_INVENTORY_INTERVAL=10
+ExecStart=/home/saket-ubuntu/Guardian/.venv/bin/python /home/saket-ubuntu/Guardian/scripts/dev_services.py --context guardian-e2e --profile guardian-e2e --log-dir /home/saket-ubuntu/Documents/ChatGPT/Guardian/output/testing/continuous
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+KillMode=control-group
+
+[Install]
+WantedBy=default.target

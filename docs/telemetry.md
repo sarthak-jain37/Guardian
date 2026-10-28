@@ -186,3 +186,89 @@ The Kubernetes client explicitly honors KUBECONFIG set through dotenv. The
 frontend requires Streamlit 1.63 or newer. llama-cpp-python is now declared as
 an application dependency; CPU wheels may be installed from the upstream
 project's wheel index when a local source build is unsuitable.
+
+### Continuous severity assessments and dashboard alerts
+
+The backend reviews each current pod serially, checks again 60 seconds after each
+cycle, and skips successful reviews whose sampled evidence, permissions, pod UID,
+boundaries and collector states are unchanged. A slow CPU model can make a full
+cycle take longer than 60 seconds. `POD_REVIEW_ENABLED`, `POD_REVIEW_INTERVAL`,
+`POD_REVIEW_EVENT_LIMIT`, `POD_ALERT_THRESHOLD` and `LLM_GRADE_MAX_TOKENS` configure it.
+Manual reviews use the same model lock and grading path.
+
+Grades are advisory model assessments from 0–10: 0–2 low concern in the sample,
+3–4 needs checking, 5–6 concerning, 7–8 dangerous, 9–10 critical. Missing evidence
+produces a null score; invalid/truncated output, unknown evidence IDs and grades
+based only on shared identity produce visible review errors, never a fabricated
+score. Exact supplied evidence IDs are required, but citation validation cannot
+verify the truth of the model's interpretation. The small test model is not a
+validated security analyst. Review its reasons against the actual evidence.
+
+GET `/telemetry/reviews` exposes assessments and worker state. GET
+`/telemetry/alerts` exposes persistent alerts and the unread count. At severity 7
+or above a per-pod-UID alert appears on every dashboard page (10-second polling)
+and in the Alerts page. Optional namespace filters affect the page list, while
+the global banner includes every namespace. POST
+`/telemetry/alerts/{uid}/acknowledge` requires the displayed alert `version` and
+returns 409 if it changed. Acknowledgement does not clear the condition. Worsening
+severity or a new flagged action signature reopens an acknowledged alert. Repeated
+observations update it without resetting acknowledgement. A later valid grade
+below threshold marks it inactive; errors or insufficient evidence do not resolve
+an existing alert. Pod replacement uses a new UID, preserving the old alert as
+history. Redis persistence depends on the configured Redis deployment; this local
+Redis container uses AOF. Records expire after the telemetry retention period.
+
+No email, desktop or Slack notifications are sent. The dashboard must be open for
+the human to see notifications; background reviews continue while it is closed.
+Neither the model nor the alert service modifies RBAC or deletes pods.
+
+
+### Continuous local monitoring
+
+The `guardian-monitor.service` user service runs `scripts/dev_services.py`, which
+supervises the API, dashboard, audit export, Hubble relay forwarding/export, and
+Tetragon export. Failed child processes retry with bounded backoff. Backend
+collectors and the pod grading worker run independently of browser requests.
+Inventory polls every 10 seconds; each pod is due for model review every 120 seconds, including unchanged evidence.
+Inference is serial; queued and overdue counts disclose CPU capacity limits.
+Model input combines aggregate counts across retained history with concrete examples
+and the previous assessment. Retention bounds apply; this is not lifetime history.
+Alerts publish immediately after a valid assessment reaches the configured threshold
+(default 7/10). Model errors never clear an existing alert.
+The dashboard refreshes automatically every 10 seconds while open.
+
+Service template: `scripts/guardian-monitor.service`. On this machine it is
+installed in the user's systemd directory, enabled, and user lingering is enabled.
+Use `systemctl --user status guardian-monitor` to inspect it,
+`systemctl --user restart guardian-monitor` to restart, and
+`systemctl --user stop guardian-monitor` to stop all supervised children.
+Logs are in `output/testing/continuous` under the chat workspace.
+The machine, Docker, Redis and Kubernetes must be available; sleep/power loss
+interrupts collection. Model failures remain errors, not successful assessments.
+
+
+### Critical alerts and permission decisions
+
+Only confirmed scores of 9–10 appear as red critical alerts. Both model passes
+must cite corroborating observations from different collectors; root status,
+ordinary token reads, permissions, and denied requests alone cannot qualify.
+Critical reviews automatically queue a model-generated permission proposal.
+The model selects removal IDs from existing rules; it cannot create grants or
+execute commands. Proposed manifests are built and validated by the server.
+
+The Alerts page shows the exact before/after Role and RoleBinding objects and
+all pods sharing the service account. Only Roles exclusively bound to that
+service account in the pod's namespace can be reduced. Shared/cluster-wide
+roles require manually scoped remediation. Other grants may still authorize
+the same actions. RoleBinding subjects and role references are preserved;
+an annotation records the accepted proposal.
+
+Accept and Reject are explicit client decisions. Acceptance rechecks the
+critical assessment, pod UID, service account, affected pods, RBAC snapshot,
+and resource versions before writing. Changed proposals are blocked. Partial
+execution is recorded rather than reported as success. Repeated decisions do
+not repeat writes. Redis stores proposal manifests and an append-only decision
+stream without expiry, including actor name supplied by the local operator,
+notes, timestamps and execution receipts. This local application does not
+provide authenticated operator identity; do not expose its write API publicly.
+After a restart, interrupted applications are marked unknown for reconciliation.

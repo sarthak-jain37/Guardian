@@ -60,4 +60,16 @@ class PodEvidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(evidence['pods'][0]['events'], [])
 
     def test_non_service_account_audit_is_not_attributed(self):
-        self.assertIsNone(normalize({'stage': 'ResponseComplete', 'user': {'username': 'admin'}}, 'audit', 'test'))
+        event=normalize({'stage': 'ResponseComplete', 'user': {'username': 'admin'}}, 'audit', 'test')
+        self.assertEqual(event['actor'],'admin')
+        self.assertEqual(event['source_pod']['pod'],'')
+        self.assertIsNone(event['token_pod_uid'])
+
+    async def test_durable_pod_history_survives_empty_global_list(self):
+        from types import SimpleNamespace
+        identity=inventory_pod(pod(),state())
+        event={'id':'old','kind':'process_exec','source_pod':{'namespace':'app','pod':'web','uid':'uid-1'},'timestamp':'2026-10-25T00:00:00Z'}
+        service=SimpleNamespace(redis=AsyncMock(),prefix='test',maximum=100,health={},events=AsyncMock(return_value=[]),pod_history=AsyncMock(return_value=[event]))
+        service.redis.get.return_value=json.dumps({'pods':[identity]})
+        result=await pod_evidence(service,'app','web')
+        self.assertEqual(result['pods'][0]['events'][0]['id'],'old')

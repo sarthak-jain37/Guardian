@@ -12,7 +12,7 @@ async def run_pipeline(redis, k8s: KubernetesService):
     while True:
         try:
             logger.info("Checking audit logs")
-            data = collect_audit_logs()
+            data = await asyncio.to_thread(collect_audit_logs)
             logger.info("Processing events")
             await process_events(data, redis, k8s)
 

@@ -29,7 +29,7 @@ class PodReviewTests(unittest.IsolatedAsyncioTestCase):
             result=await review_context(service,'app','web',3)
         self.assertEqual(result['events'][0]['id'],'runtime-id')
         self.assertEqual(result['shared_identity_events'][0]['id'],'shared-id')
-        self.assertNotIn('cap',result['events'][0]['runtime'])
+        self.assertEqual(result['events'][0]['runtime']['cap']['effective'],['CAP_SYS_ADMIN'])
 
     async def test_missing_pod_is_not_an_empty_success(self):
         service=AsyncMock();service.maximum=100

@@ -46,9 +46,7 @@ def audit_details(raw):
         return None
     user = raw.get('user') or {}
     actor = user.get('username', '')
-    if not actor.startswith('system:serviceaccount:'):
-        return None
-    pieces = actor.split(':', 3)
+    pieces = actor.split(':', 3) if actor.startswith('system:serviceaccount:') else []
     extra = user.get('extra') or {}
     def first(key):
         value = extra.get('authentication.kubernetes.io/' + key, [])
@@ -67,7 +65,7 @@ def audit_details(raw):
         signals.append('api_authentication_or_authorization_denied')
     return {'kind': 'kubernetes_audit', 'timestamp': raw.get('requestReceivedTimestamp'),
             'audit_id': raw.get('auditID'), 'stage': raw.get('stage'), 'actor': actor,
-            'source_pod': {'namespace': pieces[2], 'pod': first('pod-name') or '', 'uid': first('pod-uid')},
+            'source_pod': {'namespace': pieces[2] if pieces else '', 'pod': first('pod-name') or '', 'uid': first('pod-uid')},
             'token_pod_uid': first('pod-uid'), 'verb': verb,
             'target': {k: ref[k] for k in ('apiGroup', 'resource', 'subresource', 'namespace', 'name', 'uid') if k in ref},
             'status_code': code, 'outcome': 'success' if isinstance(code, int) and 200 <= code < 300 else 'denied' if code in (401, 403) else 'other_or_unknown',

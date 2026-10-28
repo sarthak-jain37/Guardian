@@ -1,15 +1,7 @@
-# Merge into the API server audit policy BEFORE a catch-all None rule.
-# Metadata only: never collect secret bodies or exec query parameters.
+# Record API request metadata for users, controllers and service accounts.
+# Request and response bodies are excluded.
 apiVersion: audit.k8s.io/v1
 kind: Policy
 omitStages: [RequestReceived]
 rules:
   - level: Metadata
-    userGroups: [system:serviceaccounts]
-  - level: Metadata
-    resources:
-      - group: rbac.authorization.k8s.io
-        resources: [roles, clusterroles, rolebindings, clusterrolebindings]
-      - group: ""
-        resources: [serviceaccounts]
-  - level: None
