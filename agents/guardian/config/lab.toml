@@ -1,0 +1,12 @@
+# Replace the requested model/revision and approved endpoint before use.
+profile = "lab"
+provider = "vllm"
+model_name = "replace-with-served-model"
+model_revision = "replace-with-pinned-revision"
+endpoint = "http://127.0.0.1:8001/v1"
+context_length = 16384
+max_output_tokens = 4096
+request_timeout_seconds = 180
+active_run_timeout_seconds = 600
+concurrency = 1
+queue_limit = 8

@@ -3,7 +3,7 @@
 *.py[cod]
 
 # Virtual environment
-.venv/
+.venv*
 venv/*
 venv
 
@@ -24,6 +24,7 @@ Thumbs.db
 
 # JSON files
 *.json
+!contracts/compatibility.json
 
 # Models & Weights
 *.gguf

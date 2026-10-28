@@ -20,4 +20,15 @@ dependencies = [
     "langchain-community>=0.4.2",
     "streamlit>=1.63.0",
     "llama-cpp-python>=0.3.36",
+    "langgraph==1.2.11",
+    "langgraph-checkpoint-sqlite>=3,<5",
+    "pydantic>=2.13.5,<3",
+]
+
+[project.optional-dependencies]
+verification = [
+    "jsonschema>=4.26,<5",
+]
+local-model = [
+    "llama-cpp-python==0.3.36",
 ]

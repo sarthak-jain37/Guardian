@@ -1,0 +1,205 @@
+{
+  "schema_version": "guardian.contract-compatibility.v1",
+  "release": "guardian.validation-handoff.v1",
+  "status": "proposed_pending_component_acceptance",
+  "source_plan": "Guardian Final Team Architecture and Implementation Plan v4.0",
+  "base_commit": "66ad8f2",
+  "release_commit": null,
+  "decision_record": "contracts/decisions/0005-validation-handoff.md",
+  "runtime_versions": {
+    "graph_version": "guardian.graph.v7",
+    "state_version": "guardian.state.v7",
+    "validator_version": "guardian.validator.v2",
+    "canonicalization_version": "guardian.sorted-json-sha256.v1",
+    "prompt_version": "guardian.bounded-stages.v4",
+    "model_output_version": "guardian.model-output.v2"
+  },
+  "contracts": [
+    {
+      "name": "usage",
+      "schema_id": "guardian.usage-summary.v1",
+      "producer": "collector",
+      "consumers": [
+        "backend",
+        "orchestration",
+        "drift"
+      ],
+      "acceptance": "pending"
+    },
+    {
+      "name": "evidence",
+      "schema_id": "guardian.evidence.v1",
+      "producer": "backend_inventory",
+      "consumers": [
+        "orchestration"
+      ],
+      "acceptance": "pending"
+    },
+    {
+      "name": "request",
+      "schema_id": "guardian.analysis-request.v5",
+      "producer": "backend_drift",
+      "consumers": [
+        "orchestration"
+      ],
+      "acceptance": "pending"
+    },
+    {
+      "name": "report",
+      "schema_id": "guardian.report.v7",
+      "producer": "orchestration",
+      "consumers": [
+        "backend",
+        "dashboard"
+      ],
+      "acceptance": "pending"
+    },
+    {
+      "name": "readiness",
+      "schema_id": "guardian.readiness.v1",
+      "producer": "deterministic_orchestration_checks",
+      "consumers": [
+        "backend",
+        "dashboard"
+      ],
+      "acceptance": "pending"
+    },
+    {
+      "name": "proposal",
+      "schema_id": "guardian.proposal.v2",
+      "producer": "orchestration",
+      "consumers": [
+        "backend",
+        "dashboard",
+        "executor"
+      ],
+      "acceptance": "pending"
+    },
+    {
+      "name": "test_decision",
+      "schema_id": "guardian.test-decision.v2",
+      "producer": "local_test_store",
+      "consumers": [
+        "orchestration_tests"
+      ],
+      "acceptance": "test_only_not_production_authority"
+    },
+    {
+      "name": "investigation",
+      "schema_id": "guardian.investigation.v1",
+      "producer": "investigator_model",
+      "consumers": [
+        "orchestration_validator"
+      ],
+      "acceptance": "module_internal"
+    },
+    {
+      "name": "plan",
+      "schema_id": "guardian.change-plan.v1",
+      "producer": "planner_model",
+      "consumers": [
+        "orchestration_validator"
+      ],
+      "acceptance": "module_internal"
+    },
+    {
+      "name": "run_versions",
+      "schema_id": "guardian.run-versions.v1",
+      "producer": "orchestration",
+      "consumers": [
+        "orchestration"
+      ],
+      "acceptance": "module_internal"
+    },
+    {
+      "name": "revision_request",
+      "schema_id": "guardian.revision-request.v1",
+      "producer": "backend_review_coordination",
+      "consumers": [
+        "orchestration_worker"
+      ],
+      "acceptance": "pending"
+    },
+    {
+      "name": "model_config",
+      "schema_id": "guardian.model-config.v2",
+      "producer": "orchestration_model_adapter",
+      "consumers": [
+        "orchestration_worker"
+      ],
+      "acceptance": "pending"
+    },
+    {
+      "name": "model_result",
+      "schema_id": "guardian.model-result.v2",
+      "producer": "orchestration_model_adapter",
+      "consumers": [
+        "orchestration_worker"
+      ],
+      "acceptance": "pending"
+    },
+    {
+      "name": "evidence_tool_request",
+      "schema_id": "guardian.evidence-tool-request.v1",
+      "producer": "orchestration_evidence_adapter",
+      "consumers": [
+        "orchestration_worker"
+      ],
+      "acceptance": "pending"
+    },
+    {
+      "name": "evidence_tool_result",
+      "schema_id": "guardian.evidence-tool-result.v1",
+      "producer": "orchestration_evidence_adapter",
+      "consumers": [
+        "orchestration_worker"
+      ],
+      "acceptance": "pending"
+    },
+    {
+      "name": "work_item",
+      "schema_id": "guardian.work-item.v2",
+      "producer": "orchestration_worker",
+      "consumers": [
+        "backend_delivery"
+      ],
+      "acceptance": "pending"
+    },
+    {
+      "name": "work_outcome",
+      "schema_id": "guardian.work-outcome.v2",
+      "producer": "orchestration_worker",
+      "consumers": [
+        "backend_delivery"
+      ],
+      "acceptance": "pending"
+    },
+    {
+      "name": "governed_decision",
+      "schema_id": "guardian.governed-decision.v1",
+      "producer": "backend_executor",
+      "consumers": [
+        "orchestration"
+      ],
+      "acceptance": "pending"
+    },
+    {
+      "name": "preflight",
+      "schema_id": "guardian.preflight.v1",
+      "producer": "backend_executor",
+      "consumers": [
+        "orchestration"
+      ],
+      "acceptance": "pending"
+    },
+    {
+      "name": "execution_receipt",
+      "schema_id": "guardian.execution-receipt.v1",
+      "producer": "backend_executor",
+      "consumers": [
+        "orchestration"
+      ],
+      "acceptance": "pending"
+    }
+  ]
+}
