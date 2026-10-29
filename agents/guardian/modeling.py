@@ -19,7 +19,7 @@ class ModelConfig(Contract):
     schema_version: Literal["guardian.model-config.v2"] = "guardian.model-config.v2"
     profile: Literal["test", "dev-laptop", "lab"] = "test"
     profile_version: Literal["guardian.model-profile.v1"] = "guardian.model-profile.v1"
-    provider: Literal["scripted", "llama-cpp", "vllm"] = "scripted"
+    provider: Literal["scripted", "llama-cpp", "vllm", "ollama"] = "scripted"
     model_name: ID = "scripted-test"
     model_revision: ID | None = None
     model_path: str | None = Field(default=None, max_length=4096)
@@ -52,11 +52,11 @@ class ModelConfig(Contract):
             raise ValueError("lab profile requires an explicit requested model revision")
         if self.provider == "llama-cpp" and (not self.model_path or self.endpoint is not None):
             raise ValueError("llama-cpp requires a model path and no endpoint")
-        if self.provider == "vllm":
+        if self.provider in ("vllm", "ollama"):
             parsed = urlsplit(self.endpoint or "")
             if (parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password
                     or parsed.query or parsed.fragment):
-                raise ValueError("vllm requires a configured HTTP endpoint without embedded credentials")
+                raise ValueError("remote provider requires an HTTP endpoint without embedded credentials")
             if self.model_path is not None:
                 raise ValueError("remote inference cannot use a local model path")
         elif self.endpoint is not None or self.api_key_env is not None:

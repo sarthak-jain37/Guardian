@@ -100,7 +100,14 @@ def remote_completion(config, messages, schema):
     body = {"model": config.model_name, "messages": messages, "max_tokens": config.max_output_tokens,
             "temperature": config.temperature,
             "response_format": {"type": "json_schema", "json_schema": {"name": "guardian", "schema": schema}}}
-    if config.seed is not None:
+    if config.provider == "ollama":
+        body = {"model": config.model_name, "messages": messages, "stream": False,
+                "think": False, "format": schema, "keep_alive": "5m",
+                "options": {"temperature": config.temperature, "num_ctx": config.context_length,
+                            "num_predict": config.max_output_tokens}}
+    if config.seed is not None and config.provider == "ollama":
+        body["options"]["seed"] = config.seed
+    elif config.seed is not None:
         body["seed"] = config.seed
     headers = {"Content-Type": "application/json"}
     if config.api_key_env:
@@ -108,12 +115,21 @@ def remote_completion(config, messages, schema):
         if not key:
             raise ValueError("model_credential_unavailable")
         headers["Authorization"] = "Bearer " + key
-    request = Request(config.endpoint.rstrip("/") + "/chat/completions", data=json.dumps(body).encode(), headers=headers)
+    route = "/api/chat" if config.provider == "ollama" else "/chat/completions"
+    request = Request(config.endpoint.rstrip("/") + route, data=json.dumps(body).encode(), headers=headers)
     with build_opener(NoRedirect()).open(request, timeout=config.request_timeout_seconds) as response:
         data = response.read(config.max_output_bytes + 1)
     if len(data) > config.max_output_bytes:
         return {"error": "output_too_large"}
-    return json.loads(data)
+    value = json.loads(data)
+    if config.provider == "ollama":
+        if value.get("done") is not True or value.get("done_reason") != "stop":
+            return {"error": "output_truncated"}
+        # Preserve common parsing, byte limits and error handling for both APIs.
+        value = {"choices": [{"finish_reason": "stop", "message": value["message"]}],
+                 "model": value.get("model"), "usage": {"prompt_tokens": value.get("prompt_eval_count"),
+                 "completion_tokens": value.get("eval_count")}}
+    return value
 
 
 def completion_output(response, limit):
@@ -239,3 +255,7 @@ class LlamaCppModelClient(ProcessModelClient):
 
 class VllmModelClient(ProcessModelClient):
     producer = "vllm"
+
+
+class OllamaModelClient(ProcessModelClient):
+    producer = "ollama"
