@@ -341,128 +341,40 @@ class TestComprehensiveDriftAndBaseline(unittest.TestCase):
     # 6. VERSION GUARD: CHECKPOINT 2 (HITL APPROVAL RACE VIA API)
     # =========================================================================
 
-    def test_version_guard_checkpoint_2_full_api_flow(self):
-        """
-        Full API flow:
-        1. Drift detected -> snapshot_hash is hash(v2).
-        2. Bob modifies cluster to v3 via kubectl while Alice looks at dashboard.
-        3. Alice clicks Approve -> Checkpoint 2 detects mismatch -> status="conflict".
-        4. Queue entry updated with new diff reflecting v3.
-        5. Alice re-reviews and clicks Approve again -> succeeds and promotes.
-        """
-        v1 = {"Role_1": {"kind": "Role", "metadata": {"name": "r"}, "rules": [{"verbs": ["get"], "resources": ["pods"]}]}}
-        v2 = {"Role_1": {"kind": "Role", "metadata": {"name": "r"}, "rules": [{"verbs": ["get", "list"], "resources": ["pods"]}]}}
-        v3 = {"Role_1": {"kind": "Role", "metadata": {"name": "r"}, "rules": [{"verbs": ["get", "list", "delete"], "resources": ["pods"]}]}}
-
-        async def setup():
-            b_active = await baseline_service.create_baseline(
-                rbac_state=v1, sa_key="__CLUSTER__", status="ACTIVE", approved_by="init", run_id=None, redis=self.redis
-            )
-            b_pending = await baseline_service.create_baseline(
-                rbac_state=v2, sa_key="__CLUSTER__", status="PENDING_APPROVAL", approved_by=None, run_id=None, redis=self.redis, parent_id=b_active["baseline_id"]
-            )
-            q_id = "queue-hitl-race"
-            entry = {
-                "id": q_id,
-                "baseline_id": b_pending["baseline_id"],
-                "risk_tier": "LOW",
-                "status": "PENDING",
-                "diff_summary": {"added": "list"},
-                "llm_analysis": "Adds list permission",
-                "sa_key": "__CLUSTER__",
-                "snapshot_hash": canonical_hash(v2),
-                "original_state": v1,
-                "latest_state": v2,
-                "net_diff": {"added": "list"},
-                "version_count": 1,
-                "version_chain": [],
-            }
-            await save_approval_queue_entry(entry, self.redis)
-            return q_id, b_pending["baseline_id"]
-
-        q_id, b_pending_id = asyncio.run(setup())
-
-        # Step 2: Bob modifies cluster to v3
-        self.k8s.get_rbac_state.return_value = v3
-
-        # Step 3: Alice clicks Approve
-        res_conflict = self.client.post(
-            f"/approval/{q_id}/decision",
-            json={"decision": "promote", "actor": "Alice"},
-        )
-        self.assertEqual(res_conflict.status_code, 200)
-        data = res_conflict.json()
-        self.assertEqual(data["status"], "conflict")
-        self.assertIn("Cluster state changed since detection", data["message"])
-
-        # Step 4: Verify queue entry was updated with snapshot_hash = hash(v3)
-        updated_q = asyncio.run(get_approval_queue_entry(q_id, self.redis))
-        self.assertEqual(updated_q["snapshot_hash"], canonical_hash(v3))
-
-        # Step 5: Alice approves the rechecked diff
-        res_promote = self.client.post(
-            f"/approval/{q_id}/decision",
-            json={"decision": "promote", "actor": "Alice"},
-        )
-        self.assertEqual(res_promote.status_code, 200)
-        self.assertEqual(res_promote.json()["status"], "promoted")
-
-        # Verify active baseline is now promoted
-        active_now = asyncio.run(baseline_service.get_active_baseline("__CLUSTER__", self.redis))
-        self.assertEqual(active_now["baseline_id"], b_pending_id)
-        self.assertEqual(active_now["status"], "ACTIVE")
-        self.assertEqual(active_now["approved_by"], "Alice")
+    def test_legacy_approval_never_promotes_or_rechecks_in_place(self):
+        from backend.app.services.redis_service import save_approval_queue_entry, get_approval_queue_entry
+        entry = {'id': 'legacy-review', 'status': 'PENDING', 'baseline_id': 'b', 'snapshot_hash': 'old'}
+        asyncio.run(save_approval_queue_entry(entry, self.redis))
+        for _ in range(2):
+            response = self.client.post('/approval/legacy-review/decision', json={'decision': 'promote', 'actor': 'Alice'})
+            self.assertEqual(response.status_code, 410)
+        self.assertEqual(asyncio.run(get_approval_queue_entry('legacy-review', self.redis))['snapshot_hash'], 'old')
+        self.assertEqual(self.k8s.mock_calls, [])
 
     # =========================================================================
     # 7. STARTUP MIGRATION & SEEDING LOGIC
     # =========================================================================
 
-    def test_legacy_baseline_migration(self):
-        """
-        Verify startup migration logic:
-        - When legacy rbac:baseline exists in Redis and no rbac:baselines:active:* exists,
-          creates an ACTIVE baseline in the new structure and deletes the old key.
-        """
-        legacy_state = {
-            "Role_legacy": {
-                "kind": "Role",
-                "metadata": {"name": "legacy", "namespace": "default"},
-                "rules": [{"verbs": ["get"], "resources": ["services"]}],
-            }
-        }
-
+    def test_startup_preserves_legacy_evidence_without_adopting_it(self):
+        from backend.app.services.observations import capture_startup_observation
+        legacy = {'old': {'kind': 'Role', 'metadata': {'name': 'old'}, 'rules': []}}
+        live = {'new': {'kind': 'Role', 'metadata': {'name': 'new'}, 'rules': []}}
         async def run():
-            # Seed legacy key
-            await self.redis.set("rbac:baseline", json.dumps(legacy_state))
+            await self.redis.set('rbac:baseline', json.dumps(legacy))
+            self.k8s.get_rbac_state.return_value = live
+            await capture_startup_observation(self.redis, self.k8s)
+            self.assertEqual(json.loads(await self.redis.get('rbac:baseline')), legacy)
+            self.assertEqual(json.loads(await self.redis.get('rbac:current')), live)
+            self.assertIsNone(await baseline_service.get_active_baseline('__CLUSTER__', self.redis))
+            self.assertEqual(await baseline_service.get_baseline_history('__CLUSTER__', self.redis), [])
+        asyncio.run(run())
 
-            # Simulate startup migration check
-            active_cluster_baseline = await baseline_service.get_active_baseline("__CLUSTER__", self.redis)
-            legacy_raw = await self.redis.get("rbac:baseline")
-
-            self.assertIsNone(active_cluster_baseline)
-            self.assertIsNotNone(legacy_raw)
-
-            # Perform migration
-            if legacy_raw and not active_cluster_baseline:
-                legacy_dict = json.loads(legacy_raw)
-                await baseline_service.create_baseline(
-                    rbac_state=legacy_dict,
-                    sa_key="__CLUSTER__",
-                    status="ACTIVE",
-                    approved_by="migration",
-                    run_id="startup-migration",
-                    redis=self.redis,
-                )
-                await self.redis.delete("rbac:baseline")
-
-            # Verify migration results
-            self.assertIsNone(await self.redis.get("rbac:baseline"))
-            new_active = await baseline_service.get_active_baseline("__CLUSTER__", self.redis)
-            self.assertIsNotNone(new_active)
-            self.assertEqual(new_active["status"], "ACTIVE")
-            self.assertEqual(new_active["approved_by"], "migration")
-            self.assertEqual(canonical_hash(new_active["rbac_state"]), canonical_hash(legacy_state))
-
+    def test_no_baseline_scan_observes_without_auto_approval(self):
+        self.k8s.get_rbac_state.return_value = {'r': {'kind': 'Role', 'metadata': {'name': 'r'}, 'rules': []}}
+        async def run():
+            self.assertEqual(await run_drift_scan(self.redis, self.k8s), [])
+            self.assertIsNone(await baseline_service.get_active_baseline('__CLUSTER__', self.redis))
+            self.assertEqual(json.loads(await self.redis.get('rbac:current')), self.k8s.get_rbac_state.return_value)
         asyncio.run(run())
 
 

@@ -159,9 +159,6 @@ async def permission_history(request: Request):
     return {'history':await request.app.state.permission_proposals.history()}
 
 @router.post('/permission-proposals/{identifier}/decision')
-async def permission_decision(request: Request, identifier: str, body: PermissionDecision):
-    from fastapi import HTTPException
-    try:
-        return await request.app.state.permission_proposals.decide(identifier,body.decision,body.actor,body.note)
-    except LookupError as exc:raise HTTPException(404,str(exc)) from exc
-    except ValueError as exc:raise HTTPException(409,str(exc)) from exc
+async def permission_decision(identifier: str):
+    from backend.app.api.routes.approval import legacy_write_disabled
+    legacy_write_disabled()

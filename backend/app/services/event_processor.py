@@ -2,7 +2,6 @@ from agents.summarizer import analyse_document
 from backend.app.services.kubernetes_service import KubernetesService
 from backend.app.services.permission_scanner import scan_dangerous_permissions
 from backend.app.services.script_runner import run_apply_script, run_modify_script
-from backend.app.services.baseline_service import create_baseline
 from backend.app.services.drift_detector import run_drift_scan
 from backend.app.services.redis_service import (
     get_last_processed_timestamp,
@@ -42,22 +41,14 @@ async def process_events(data, redis, k8s: KubernetesService) -> None:
         last_processed_modify = parse_timestamp(last_processed_modify)
 
     if most_recent_apply and (last_processed_apply is None or most_recent_apply > last_processed_apply):
-        baseline = run_apply_script(k8s)
-        
-        # Create a baseline via baseline_service instead of raw save_rbac_state()
-        await create_baseline(
-            rbac_state=baseline,
-            sa_key="__CLUSTER__",
-            status="ACTIVE",
-            approved_by="kubectl-apply",
-            run_id=None,
-            redis=redis,
-        )
-        await save_rbac_state(BASELINE_KEY, baseline, redis)
+        observed = run_apply_script(k8s)
+        # fieldManager/userAgent are provenance, never approval. An external
+        # apply updates observed state without replacing approved desired state.
+        await save_rbac_state(CURRENT_KEY, observed, redis)
         await set_last_processed_timestamp("apply", most_recent_apply.isoformat(), redis)
 
         # Trigger dangerous permission scan on new baseline apply
-        findings = scan_dangerous_permissions(baseline)
+        findings = scan_dangerous_permissions(observed)
         await save_dangerous_permissions(findings, redis)
         
     if most_recent_modify and (last_processed_modify is None or most_recent_modify > last_processed_modify):

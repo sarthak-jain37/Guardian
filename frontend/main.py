@@ -209,22 +209,7 @@ def permission_proposal_view(proposal):
             with left:st.caption('Current configuration at proposal time');st.json(change['before'],expanded=False)
             with right:st.caption('Proposed configuration');st.json(change['after'],expanded=False)
         if proposal['status']=='pending':
-            st.warning('Accepting applies these permission reductions to the cluster. Workloads can stop working if they need the removed permissions.')
-            with st.form('permission_decision_'+proposal['id']):
-                actor=st.text_input('Record decision under your name',key='actor_'+proposal['id'])
-                note=st.text_area('Decision note',key='note_'+proposal['id'])
-                accept=st.form_submit_button('Accept and apply reductions',type='primary')
-                reject=st.form_submit_button('Reject proposal')
-                if accept or reject:
-                    if not actor.strip():st.error('Enter a name for the decision log.')
-                    else:
-                        try:
-                            response=requests.post(BACKEND_URL+'/telemetry/permission-proposals/'+quote(proposal['id'],safe='')+'/decision',json={'decision':'accept' if accept else 'reject','actor':actor.strip(),'note':note},timeout=120)
-                            response.raise_for_status()
-                            outcome=response.json()
-                            st.session_state['permission_decision_receipt']=outcome
-                            st.cache_data.clear();st.rerun()
-                        except (requests.RequestException,ValueError) as exc:st.error('Decision failed: '+str(exc)+'. Inspect the decision history before retrying.')
+            st.info('This is a legacy draft. Applying changes is disabled while authenticated governed review and verification are integrated.')
         if proposal.get('error'):st.error(proposal['error'])
         if proposal.get('receipt'):
             with st.expander('Execution receipt'):st.json(proposal['receipt'])
@@ -512,43 +497,7 @@ def approval_queue_page():
                     st.info(f"Collapsed: {count} changes accumulated before review. Default view shows net diff.")
 
             with action_col:
-                b1, b2 = st.columns(2)
-                if b1.button('Approve', key=f"app_{qid}", type='primary', width='stretch'):
-                    try:
-                        resp = requests.post(
-                            f"{BACKEND_URL}/approval/{qid}/decision",
-                            json={"decision": "promote", "actor": "admin", "note": "Approved via dashboard"},
-                            timeout=30,
-                        )
-                        res_json = resp.json()
-                        if resp.ok and res_json.get('status') == 'promoted':
-                            st.success('Baseline promoted successfully!')
-                            st.cache_data.clear()
-                            st.rerun()
-                        elif res_json.get('status') == 'conflict':
-                            st.warning(f"Version Guard Conflict: {res_json.get('message')}")
-                            st.cache_data.clear()
-                            st.rerun()
-                        else:
-                            st.error(f"Approval failed: {resp.text}")
-                    except Exception as err:
-                        st.error(f"Error submitting decision: {err}")
-
-                if b2.button('Reject', key=f"rej_{qid}", width='stretch'):
-                    try:
-                        resp = requests.post(
-                            f"{BACKEND_URL}/approval/{qid}/decision",
-                            json={"decision": "reject", "actor": "admin", "note": "Rejected via dashboard"},
-                            timeout=30,
-                        )
-                        if resp.ok:
-                            st.info('Baseline change rejected.')
-                            st.cache_data.clear()
-                            st.rerun()
-                        else:
-                            st.error(f"Rejection failed: {resp.text}")
-                    except Exception as err:
-                        st.error(f"Error submitting decision: {err}")
+                st.info('Legacy finding · read only. Governed review is being integrated; no changes can be applied here.')
 
             st.markdown("**LLM Security Explanation**")
             st.write(entry.get('llm_analysis') or 'No LLM analysis available.')
@@ -568,30 +517,19 @@ def approval_queue_page():
                         st.markdown(f"**Version {ver}** · Severity: `{sev}` · Confidence: `{conf}` · Timestamp: `{ts}`")
                         st.json(item.get('diff_from_prev'), expanded=False)
 
-    with st.expander("Authoritative Baseline & Version History"):
+    with st.expander("Legacy Baseline & Version History"):
         try:
             active_res = requests.get(BACKEND_URL + '/baselines/active', timeout=10)
             if active_res.ok:
                 act = active_res.json()
-                st.subheader(f"Authoritative Active Baseline (Version {act.get('version_number', '1')})")
+                st.subheader(f"Legacy Recorded Baseline (Version {act.get('version_number', '1')})")
                 col_a, col_b = st.columns([3, 1])
                 with col_a:
                     st.write(f"**Baseline ID**: `{act.get('baseline_id')}`")
                     st.write(f"**Canonical Hash**: `{act.get('canonical_hash')}`")
                     st.caption(f"Applied at: {timestamp(act.get('applied_at'))} · Approved by: {act.get('approved_by') or 'system'}")
                 with col_b:
-                    if act.get('parent_id'):
-                        if st.button("Rollback (Mark Broken)", type="secondary", width="stretch"):
-                            try:
-                                rb_res = requests.post(f"{BACKEND_URL}/baselines/{act.get('baseline_id')}/rollback", timeout=30)
-                                if rb_res.ok:
-                                    st.warning(f"Baseline marked BROKEN_ROLLBACK. Restored parent baseline {act.get('parent_id')}.")
-                                    st.cache_data.clear()
-                                    st.rerun()
-                                else:
-                                    st.error(f"Rollback failed: {rb_res.text}")
-                            except Exception as e:
-                                st.error(f"Error during rollback: {e}")
+                    st.caption('Legacy history; approval authority has not been verified. General baseline rollback is retired.')
             else:
                 st.info("No active baseline currently recorded.")
 

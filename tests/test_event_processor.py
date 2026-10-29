@@ -50,6 +50,7 @@ class TestEventProcessorIntegration(unittest.TestCase):
 
         await process_events({}, mock_redis, mock_k8s)
 
+        mock_save_rbac.assert_called_once_with("rbac:current", fake_baseline, mock_redis)
         mock_run_apply.assert_called_once_with(mock_k8s)
         mock_scan_danger.assert_called_once_with(fake_baseline)
         mock_save_danger.assert_called_once_with(mock_scan_danger.return_value, mock_redis)

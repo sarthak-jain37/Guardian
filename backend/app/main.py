@@ -13,9 +13,7 @@ from redis.asyncio import Redis
 from backend.app.services.kubernetes_service import KubernetesService
 from backend.app.services.permission_scanner import scan_dangerous_permissions
 from backend.app.services.redis_service import save_dangerous_permissions
-import json
-
-from backend.app.services.baseline_service import create_baseline, get_active_baseline
+from backend.app.services.observations import capture_startup_observation
 from backend.app.api.routes.approval import router as approval_router
 from backend.app.api.routes.output import router as output_router
 from backend.app.api.routes.dangerous_permissions import router as dangerous_permissions_router
@@ -47,7 +45,7 @@ async def lifespan(app: FastAPI):
     # Seed dangerous permissions cache on application startup
     try:
         logging.info("Running initial RBAC dangerous permissions scan on startup...")
-        current_state = k8s.get_rbac_state()
+        current_state = await capture_startup_observation(redis, k8s)
         findings = scan_dangerous_permissions(current_state)
         await save_dangerous_permissions(findings, redis)
         logging.info(
@@ -56,39 +54,6 @@ async def lifespan(app: FastAPI):
         )
     except Exception:
         logging.exception("Failed initial RBAC scan on startup (K8s cluster may be unavailable)")
-
-    # Baseline Versioning Migration & Initialization
-    try:
-        active_cluster_baseline = await get_active_baseline("__CLUSTER__", redis)
-        legacy_baseline_raw = await redis.get("rbac:baseline")
-
-        if legacy_baseline_raw and not active_cluster_baseline:
-            logging.info("Migrating legacy rbac:baseline key to new baseline versioning architecture...")
-            legacy_baseline = json.loads(legacy_baseline_raw)
-            await create_baseline(
-                rbac_state=legacy_baseline,
-                sa_key="__CLUSTER__",
-                status="ACTIVE",
-                approved_by="migration",
-                run_id="startup-migration",
-                redis=redis,
-            )
-            await redis.delete("rbac:baseline")
-            logging.info("Migration of rbac:baseline completed successfully.")
-        elif not active_cluster_baseline:
-            logging.info("Seeding initial ACTIVE baseline from current cluster RBAC state...")
-            current_state = k8s.get_rbac_state()
-            await create_baseline(
-                rbac_state=current_state,
-                sa_key="__CLUSTER__",
-                status="ACTIVE",
-                approved_by="system_startup",
-                run_id="startup-seed",
-                redis=redis,
-            )
-            logging.info("Initial active baseline seeded.")
-    except Exception:
-        logging.exception("Failed baseline initialization / migration on startup")
 
     worker_task = asyncio.create_task(run_pipeline(redis, k8s))
 
@@ -120,4 +85,4 @@ app.include_router(approval_router)
 
 @app.get("/")
 def health_check():
-    return {"health": "ok"}
+    return {"health": "ok", "execution_enabled": False}

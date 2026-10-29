@@ -19,6 +19,7 @@ from backend.app.services.redis_service import (
     get_pending_approval_by_sa,
     save_approval_queue_entry,
     update_approval_queue_entry,
+    save_rbac_state,
 )
 
 logger = logging.getLogger(__name__)
@@ -126,15 +127,8 @@ async def run_drift_scan(redis: Redis, k8s: KubernetesService) -> list[dict[str,
     active_baseline = await get_active_baseline(sa_key, redis)
 
     if not active_baseline or not active_baseline.get("rbac_state"):
-        logger.info("No active baseline found; seeding initial ACTIVE baseline from live cluster state.")
-        await create_baseline(
-            rbac_state=live_state,
-            sa_key=sa_key,
-            status="ACTIVE",
-            approved_by="system_init",
-            run_id="initial-seed",
-            redis=redis,
-        )
+        logger.info("No approved baseline; retaining observed state for initial analysis.")
+        await save_rbac_state("rbac:current", live_state, redis)
         return []
 
     live_hash = canonical_hash(live_state)
