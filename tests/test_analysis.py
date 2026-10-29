@@ -249,3 +249,21 @@ class AnalysisTests(unittest.TestCase):
             self.analysis.decide(run['run_id'],self.decision(run,'request_context'),self.human)
         saved=self.analysis.get(run['run_id'],self.human)
         self.assertIsNone(saved['decision']);self.assertEqual(saved['review_state'],'OPEN')
+
+    def test_watch_ignores_resource_version_churn_but_detects_recreated_identity(self):
+        run,job=self.run_job()
+        self.state['r']['metadata']['resourceVersion']='only-rv-churn'
+        schedule_once(self.analysis,'lab',['guardian-demo'])
+        self.assertEqual(len(self.analysis.list('lab','guardian-demo',self.human)),1)
+        self.state['r']['metadata']['uid']='recreated-role'
+        schedule_once(self.analysis,'lab',['guardian-demo'])
+        self.assertEqual(len(self.analysis.list('lab','guardian-demo',self.human)),2)
+
+    def test_first_watch_detects_change_during_initial_inference(self):
+        run=self.queued()
+        self.state['r']['rules'][0]['verbs'].append('list')
+        job=self.analysis.claim(JobClaim(cluster_id='lab',namespace='guardian-demo'),self.worker)
+        process_job(self.worker_client,job,self.checkpoints,clock=self.db.now)
+        schedule_once(self.analysis,'lab',['guardian-demo'])
+        self.assertEqual(len(self.analysis.list('lab','guardian-demo',self.human)),2)
+        self.assertEqual(self.analysis.get(run['run_id'],self.human)['review_state'],'SUPERSEDED')

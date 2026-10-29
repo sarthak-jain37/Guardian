@@ -5,19 +5,9 @@ from datetime import datetime, timedelta
 from backend.app.core.auth import Principal
 from backend.app.models.analysis import AnalysisIntake
 from backend.app.services.governance_store import digest, LedgerError
-from backend.app.services.canonical_hash import canonical_hash
+from backend.app.services.inventory_semantics import observation_hash
 
 logger=logging.getLogger(__name__)
-
-
-def context_fingerprint(inventory):
-    objects=[]
-    for obj in inventory['objects']:
-        metadata=obj.get('metadata',{});status=obj.get('status',{})
-        objects.append({'kind':obj.get('kind'),'uid':metadata.get('uid'),'owners':metadata.get('ownerReferences',[]),
-            'spec':obj.get('spec',{}),'images':[{'imageID':c.get('imageID'),'restartCount':c.get('restartCount'),
-                'ready':c.get('ready')} for c in status.get('containerStatuses',[])]})
-    return {'objects':sorted(objects,key=lambda o:(o['kind'] or '',o['uid'] or '')),'errors':sorted(inventory['errors'])}
 
 
 def schedule_once(store,cluster,namespaces,*,period_seconds=3600):
@@ -32,10 +22,9 @@ def schedule_once(store,cluster,namespaces,*,period_seconds=3600):
     inventories={ns:store.inventory.k8s.get_workload_inventory(ns) for ns in {c['namespace'] for c in cases}}
     for case in cases:
         namespace=case['namespace']
-        scoped={key:value for key,value in state.items() if value.get('kind') in ('ClusterRole','ClusterRoleBinding')
-            or value.get('metadata',{}).get('namespace')==namespace}
-        # Separate observation cursor; this is never an approved baseline.
-        current=digest([canonical_hash(scoped),context_fingerprint(inventories[namespace])])
+        # Compare against the inventory captured before inference, so a change
+        # during the first model call is not lost when the watcher starts.
+        current=observation_hash(state,inventories[namespace],namespace)
         with store.db.transaction() as db:
             old=db.execute('SELECT content_hash FROM analysis_observations WHERE case_id=?',(case['case_id'],)).fetchone()
         now=store.db.now()

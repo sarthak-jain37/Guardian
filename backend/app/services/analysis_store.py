@@ -193,6 +193,10 @@ class AnalysisStore:
                 db.execute("UPDATE analysis_runs SET status='FAILED',error=?,lease_token=NULL,lease_until=NULL WHERE run_id=?",(error,run_id))
                 self.event(db,run_id,'evidence_unavailable','backend',reason=error)
             else:
+                observed=self.inventory.observed_hash(evidence.snapshot_id)
+                if isinstance(observed,str):
+                    db.execute('INSERT INTO analysis_observations VALUES (?,?) ON CONFLICT(case_id) DO UPDATE SET content_hash=excluded.content_hash',
+                        (row['case_id'],observed))
                 db.execute("UPDATE analysis_runs SET status='QUEUED',request=?,retention_state=?,lease_token=NULL,lease_until=NULL WHERE run_id=?",
                     (request.model_dump_json(),retention,run_id))
                 self.event(db,run_id,'snapshot_bound','backend',snapshot_id=evidence.snapshot_id,

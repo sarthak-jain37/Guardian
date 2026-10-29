@@ -9,6 +9,7 @@ from agents.guardian.policy import operations
 from backend.app.models.evidence import UsageQuery
 from backend.app.services.governance_store import digest
 from backend.app.services.pod_evidence import grants_for_pod
+from backend.app.services.inventory_semantics import observation_hash
 
 
 class EvidenceInventory:
@@ -25,6 +26,11 @@ class EvidenceInventory:
               BEGIN SELECT RAISE(ABORT,'immutable_evidence'); END;
             CREATE TRIGGER IF NOT EXISTS snapshots_no_delete BEFORE DELETE ON evidence_snapshots
               BEGIN SELECT RAISE(ABORT,'immutable_evidence'); END;
+            CREATE TABLE IF NOT EXISTS evidence_snapshot_observations (snapshot_id TEXT PRIMARY KEY,observed_hash TEXT NOT NULL);
+            CREATE TRIGGER IF NOT EXISTS snapshot_observations_no_update BEFORE UPDATE ON evidence_snapshot_observations
+              BEGIN SELECT RAISE(ABORT,'immutable_evidence'); END;
+            CREATE TRIGGER IF NOT EXISTS snapshot_observations_no_delete BEFORE DELETE ON evidence_snapshot_observations
+              BEGIN SELECT RAISE(ABORT,'immutable_evidence'); END;
             ''')
 
     def load(self,snapshot_id):
@@ -32,6 +38,11 @@ class EvidenceInventory:
             row=db.execute('SELECT payload FROM evidence_snapshots WHERE snapshot_id=?',(snapshot_id,)).fetchone()
             if row is None:raise LookupError('snapshot_not_found')
             return EvidenceBundle.model_validate_json(row['payload'])
+
+    def observed_hash(self,snapshot_id):
+        with self.db._connect() as db:
+            row=db.execute('SELECT observed_hash FROM evidence_snapshot_observations WHERE snapshot_id=?',(snapshot_id,)).fetchone()
+            return row[0] if row else None
 
     def capture(self,cluster_id,namespace,role_name,window,*,owner_note=None,owner_notes=()):
         state=self.k8s.get_rbac_state()
@@ -117,4 +128,6 @@ class EvidenceInventory:
         with self.db.transaction() as db:
             db.execute('INSERT INTO evidence_snapshots VALUES (?,?,?,?,?,?)',
                 (evidence.snapshot_id,cluster_id,namespace,target.uid,evidence.model_dump_json(),digest(evidence.model_dump(mode='json'))))
+            db.execute('INSERT INTO evidence_snapshot_observations VALUES (?,?)',
+                (evidence.snapshot_id,observation_hash(state,inventory,namespace)))
         return evidence
