@@ -69,7 +69,7 @@ def runtime_schema(schema, payload):
     # This is the same inventory requirement independently enforced by the validators.
     definition_name = "PermissionAssessment" if "PermissionAssessment" in schema.get("$defs", {}) else "PlanDecision"
     field = "permission_assessments" if definition_name == "PermissionAssessment" else "decisions"
-    if definition_name in schema.get("$defs", {}):
+    if definition_name in schema.get("$defs", {}) and "prefixItems" not in schema.get("properties", {}).get(field, {}):
         entries = []
         for fact in payload["facts"]:
             entry = deepcopy(schema["$defs"][definition_name])

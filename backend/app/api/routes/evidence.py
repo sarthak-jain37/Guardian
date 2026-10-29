@@ -37,10 +37,29 @@ async def roles(request:Request,cluster_id:str,namespace:str,principal:Authentic
     principal.require('read',cluster_id,namespace)
     configured=getattr(request.app.state,'analysis_cluster_id',None)
     if cluster_id!=configured:raise HTTPException(403,'cluster_not_configured')
-    state=await asyncio.to_thread(request.app.state.k8s.get_rbac_state)
+    def read_roles():
+        k8s=request.app.state.k8s
+        rows=k8s.rbac_api.list_namespaced_role(namespace,_request_timeout=(5,10)).items
+        return [k8s.api_client.sanitize_for_serialization(row) for row in rows]
+    try:state=await asyncio.to_thread(read_roles)
+    except Exception:raise HTTPException(503,'role_inventory_unavailable') from None
     return {'roles':[{'name':o['metadata']['name'],'uid':o['metadata'].get('uid'),
-            'resource_version':o['metadata'].get('resourceVersion')} for o in state.values()
-            if o.get('kind')=='Role' and o.get('metadata',{}).get('namespace')==namespace]}
+            'resource_version':o['metadata'].get('resourceVersion')} for o in state
+            if o.get('metadata',{}).get('namespace')==namespace]}
+
+
+@router.get('/status')
+async def evidence_status(request:Request,cluster_id:str,namespace:str,principal:Authenticated):
+    principal.require('read',cluster_id,namespace)
+    usage=await source(request)
+    def read():
+        with usage.db._connect() as db:
+            progress=db.execute('''SELECT MAX(processed_through) FROM evidence_coverage
+                JOIN evidence_sources USING(source_id) WHERE cluster_id=? AND namespace=?''',
+                (cluster_id,namespace)).fetchone()[0]
+        return {'cluster_id':cluster_id,'namespace':namespace,'processed_through':progress,
+            'scope_completeness':'check_each_requested_operation_in_usage_summary'}
+    return await asyncio.to_thread(read)
 
 
 @router.post('/archive-query')

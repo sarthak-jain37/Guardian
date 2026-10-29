@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import uuid
@@ -6,7 +7,6 @@ from typing import Any
 from deepdiff import DeepDiff
 from redis.asyncio import Redis
 
-from agents.summarizer import analyse_document
 from backend.app.services.baseline_service import (
     create_baseline,
     get_active_baseline,
@@ -112,13 +112,13 @@ async def run_drift_scan(redis: Redis, k8s: KubernetesService) -> list[dict[str,
     6. If mismatch:
        a. Compute DeepDiff(active_state, live_state)
        b. Classify risk tier
-       c. Run LLM analysis on the diff
+       c. Record observational history (analysis uses the dedicated worker)
        d. Handle Lazy Grouping / update or create approval queue entry
        e. Create PENDING_APPROVAL baseline entry
        f. Return list of drift findings
     """
     try:
-        live_state = k8s.get_rbac_state()
+        live_state = await asyncio.to_thread(k8s.get_rbac_state)
     except Exception as e:
         logger.error(f"Failed to fetch live RBAC state from K8s: {e}")
         return []
@@ -148,12 +148,9 @@ async def run_drift_scan(redis: Redis, k8s: KubernetesService) -> list[dict[str,
     # 6.b Classify risk tier
     risk_tier = classify_drift_risk(diff, active_state, live_state)
 
-    # 6.c Run LLM analysis on the diff
-    try:
-        llm_analysis = analyse_document(diff)
-    except Exception as err:
-        logger.warning(f"LLM summarizer failed on drift diff: {err}")
-        llm_analysis = f"Automated analysis unavailable: {err}"
+    # Inference belongs to the dedicated scoped analysis worker. The legacy
+    # history remains observational and cannot delay audit ingestion.
+    llm_analysis = "Observed drift; use the authenticated Analysis and review workspace for evidence-backed analysis."
 
     # 6.d Lazy Grouping (Version Chain Collapse)
     pending_entry = await get_pending_approval_by_sa(sa_key, redis)
@@ -179,10 +176,7 @@ async def run_drift_scan(redis: Redis, k8s: KubernetesService) -> list[dict[str,
         net_diff = _sanitize_diff(DeepDiff(original_state, live_state, ignore_order=True))
         net_risk = classify_drift_risk(net_diff, original_state, live_state)
 
-        try:
-            net_llm = analyse_document(net_diff)
-        except Exception:
-            net_llm = llm_analysis
+        net_llm = llm_analysis
 
         new_baseline = await create_baseline(
             rbac_state=live_state,
@@ -311,7 +305,7 @@ async def propose_llm_policy(
     Caps retries at 3 attempts per Section 6.4.
     """
     input_hash = canonical_hash(input_state)
-    fresh_state = k8s.get_rbac_state()
+    fresh_state = await asyncio.to_thread(k8s.get_rbac_state)
     fresh_hash = canonical_hash(fresh_state)
 
     if fresh_hash != input_hash:

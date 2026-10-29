@@ -7,6 +7,7 @@ import os
 import re
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 from backend.app.services.pod_review import review_context
@@ -76,7 +77,12 @@ def validate_critical_support(grade,document):
 
 def fingerprint(document):
     stable = {k: document.get(k) for k in ('pod', 'containers', 'permission_points', 'boundaries')}
-    stable['grading_configuration'] = {'rubric':'severity-v2-history', 'model':os.getenv('MODEL_PATH',''), 'context':os.getenv('LLM_CONTEXT_SIZE','8192'), 'output_tokens':os.getenv('LLM_GRADE_MAX_TOKENS','512')}
+    from agents.guardian.modeling import load_profile
+    profile=os.getenv('GUARDIAN_MODEL_PROFILE') or Path(__file__).resolve().parents[3]/'agents/guardian/config/dev-laptop.toml'
+    try:identity=load_profile(profile).fingerprint()
+    except (ValueError,OSError):identity='profile_unavailable'
+    stable['grading_configuration'] = {'rubric':'severity-v2-history', 'profile_hash':identity,
+        'output_tokens':os.getenv('LLM_GRADE_MAX_TOKENS','512')}
     stable['events'] = [e['id'] for e in document.get('events', [])]
     stable['history'] = document.get('history_summary')
     stable['shared'] = [e['id'] for e in document.get('shared_identity_events', [])]

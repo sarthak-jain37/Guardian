@@ -33,7 +33,7 @@ class EvidenceInventory:
             if row is None:raise LookupError('snapshot_not_found')
             return EvidenceBundle.model_validate_json(row['payload'])
 
-    def capture(self,cluster_id,namespace,role_name,window):
+    def capture(self,cluster_id,namespace,role_name,window,*,owner_note=None,owner_notes=()):
         state=self.k8s.get_rbac_state()
         inventory=self.k8s.get_workload_inventory(namespace)
         roles=[r for r in state.values() if r.get('kind')=='Role' and r['metadata'].get('namespace')==namespace and r['metadata']['name']==role_name]
@@ -101,7 +101,8 @@ class EvidenceInventory:
             consumer_inventory_complete=namespace in self.controlled and not errors and len(roots)==1,
             alternate_grants=sorted(alternate)[:64],collected_at=self.usage.clock(),provenance='cluster_metadata',
             evidence_refs=[ref],exercised_behaviors=[],known_dependencies=[],unexercised_operations=[],
-            optional_documents=[json.dumps({'scheduled_workloads':schedules})[:4000]] if schedules else [],conflicts=[])
+            optional_documents=([json.dumps({'scheduled_workloads':schedules})[:4000]] if schedules else [])+
+                ([owner_note] if owner_note else [])+list(owner_notes),conflicts=[])
         keys={}
         for group,resource,verb in sorted(target_ops):
             base,_,subresource=resource.partition('/')

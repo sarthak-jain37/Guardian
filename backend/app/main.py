@@ -28,6 +28,10 @@ from backend.app.api.routes.evidence import router as evidence_router
 from backend.app.services.usage_store import UsageStore
 from backend.app.services.evidence_inventory import EvidenceInventory
 from backend.app.services.evidence_archive import EvidenceArchive
+from backend.app.services.analysis_store import AnalysisStore
+from backend.app.api.routes.analysis import router as analysis_router
+from backend.app.workers.analysis import run_analysis_preparation
+from agents.guardian.modeling import load_profile
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,6 +57,11 @@ async def lifespan(app: FastAPI):
     if os.getenv("GUARDIAN_ARCHIVE_DIRECTORY") and os.getenv("GUARDIAN_ARCHIVE_KEYS"):
         app.state.evidence_archive = EvidenceArchive(app.state.usage, os.environ["GUARDIAN_ARCHIVE_DIRECTORY"],
             os.environ["GUARDIAN_ARCHIVE_KEYS"])
+    model_profile=load_profile(os.getenv("GUARDIAN_MODEL_PROFILE", "agents/guardian/config/dev-laptop.toml"))
+    app.state.analysis = AnalysisStore(app.state.governance, app.state.evidence_inventory,
+        model_config=model_profile,capacity=model_profile.queue_limit,archive=app.state.evidence_archive)
+    if app.state.analysis.model_config.provider == "scripted":
+        raise ValueError("scripted_profile_is_test_only")
     app.state.telemetry = Telemetry(redis)
     from backend.app.services.permission_proposals import PermissionProposals
     app.state.permission_proposals = PermissionProposals(redis,k8s,app.state.telemetry.cluster)
@@ -60,6 +69,8 @@ async def lifespan(app: FastAPI):
     app.state.pod_grader = PodGrader(app.state.telemetry)
     app.state.pod_grader.proposals = app.state.permission_proposals
     telemetry_tasks = app.state.telemetry.start()
+    telemetry_tasks.append(asyncio.create_task(run_analysis_preparation(app.state.analysis,
+        app.state.analysis_cluster_id, [ns.strip() for ns in os.getenv("GUARDIAN_ANALYSIS_NAMESPACES", "").split(",") if ns.strip()])))
     telemetry_tasks.append(asyncio.create_task(app.state.pod_grader.run()))
     telemetry_tasks.append(asyncio.create_task(refresh_inventory(app.state.telemetry, k8s)))
 
@@ -104,6 +115,7 @@ app.include_router(dangerous_permissions_router)
 app.include_router(approval_router)
 app.include_router(governance_router)
 app.include_router(evidence_router)
+app.include_router(analysis_router)
 
 
 

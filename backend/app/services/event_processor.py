@@ -1,4 +1,4 @@
-from agents.summarizer import analyse_document
+import asyncio
 from backend.app.services.kubernetes_service import KubernetesService
 from backend.app.services.permission_scanner import scan_dangerous_permissions
 from backend.app.services.script_runner import run_apply_script, run_modify_script
@@ -41,7 +41,7 @@ async def process_events(data, redis, k8s: KubernetesService) -> None:
         last_processed_modify = parse_timestamp(last_processed_modify)
 
     if most_recent_apply and (last_processed_apply is None or most_recent_apply > last_processed_apply):
-        observed = run_apply_script(k8s)
+        observed = await asyncio.to_thread(run_apply_script, k8s)
         # fieldManager/userAgent are provenance, never approval. An external
         # apply updates observed state without replacing approved desired state.
         await save_rbac_state(CURRENT_KEY, observed, redis)
@@ -59,16 +59,13 @@ async def process_events(data, redis, k8s: KubernetesService) -> None:
             pass
 
         baseline = await get_rbac_state(BASELINE_KEY, redis)
-        current, diff_dict = run_modify_script(k8s, baseline)
+        current, diff_dict = await asyncio.to_thread(run_modify_script, k8s, baseline)
         
         await save_rbac_state(CURRENT_KEY, current, redis)
         
         if diff_dict:
-            try:
-                llm_response = analyse_document(diff_dict)
-            except Exception:
-                llm_response = "Automated analysis unavailable"
-            
+            llm_response = "Observed RBAC change; evidence-backed analysis runs in the scoped analysis worker."
+
             await save_drift_event(diff_dict, llm_response, redis)
         
         await set_last_processed_timestamp("modify", most_recent_modify.isoformat(), redis)

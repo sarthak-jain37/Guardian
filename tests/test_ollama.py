@@ -53,3 +53,20 @@ class OllamaTests(unittest.TestCase):
     def test_endpoint_credentials_and_scripted_real_profile_are_rejected(self):
         with self.assertRaises(ValueError):self.config.model_validate({**self.config.model_dump(),'endpoint':'http://token@localhost'})
         with self.assertRaises(ValueError):ModelConfig(profile='dev-laptop',provider='scripted')
+
+    def test_decoding_mirrors_allowed_choices_without_forcing_eligible_removal(self):
+        from agents.guardian.contracts import Investigation
+        from agents.guardian.modeling import scoped_schema
+        from jsonschema import Draft202012Validator
+        facts=[{'permission_id':'protected','eligible':False,'evidence_ids':['source-a']},
+               {'permission_id':'candidate','eligible':True,'evidence_ids':['source-b']}]
+        schema=scoped_schema(Investigation.model_json_schema(),{'facts':facts})
+        validator=Draft202012Validator(schema)
+        output={'summary':'Evidence assessment','permission_assessments':[
+            {'permission_id':'protected','recommendation':'retain','evidence_ids':['source-a'],'reason':'Known usage'},
+            {'permission_id':'candidate','recommendation':'retain','evidence_ids':['source-b'],'reason':'Remaining uncertainty'}],
+            'uncertainty':[],'questions':[],'context_requests':[]}
+        validator.validate(output)
+        output['permission_assessments'][1]['recommendation']='propose_remove';validator.validate(output)
+        output['permission_assessments'][0]['recommendation']='propose_remove'
+        self.assertTrue(list(validator.iter_errors(output)))

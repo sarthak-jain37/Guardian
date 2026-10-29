@@ -113,6 +113,30 @@ def scoped_schema(schema, payload):
              "required": list(entry), "additionalProperties": False} for entry in menu]}
     if payload.get("remaining_lookup_rounds") == 0 and "context_requests" in schema.get("properties", {}):
         schema["properties"]["context_requests"]["maxItems"] = 0
+    # Reflect the *existing* domain validator's allowed decisions in decoding.
+    # This supplies no expected answer: an eligible permission can still be
+    # retained, deferred or investigated. Ineligible removal is never a choice.
+    facts = payload.get("facts", [])
+    definition = "PermissionAssessment" if "PermissionAssessment" in schema.get("$defs", {}) else "PlanDecision"
+    field = "permission_assessments" if definition == "PermissionAssessment" else "decisions"
+    if facts and definition in schema.get("$defs", {}):
+        suggested = {a["permission_id"] for a in payload.get("investigation", {}).get("permission_assessments", [])
+                     if a["recommendation"] == "propose_remove"}
+        entries = []
+        for fact in facts:
+            entry = deepcopy(schema["$defs"][definition])
+            properties = entry["properties"]
+            properties["permission_id"] = {"type": "string", "const": fact["permission_id"]}
+            properties["evidence_ids"]["items"] = {"type": "string", "enum": fact["evidence_ids"]}
+            if definition == "PermissionAssessment" and not fact.get("eligible", False):
+                properties["recommendation"]["enum"] = ["retain", "request_context", "human_investigation"]
+            elif definition == "PlanDecision" and (not fact.get("eligible", False) or fact["permission_id"] not in suggested):
+                properties["action"]["enum"] = ["retain"]
+            entries.append(entry)
+        schema["properties"][field] = {"type": "array", "prefixItems": entries,
+                                      "minItems": len(entries), "maxItems": len(entries)}
+    if "target_id" in schema.get("properties", {}) and payload.get("target_uid"):
+        schema["properties"]["target_id"] = {"type": "string", "const": payload["target_uid"]}
     return schema
 
 
