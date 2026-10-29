@@ -1,0 +1,81 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": [
+    "image",
+    "clusterId",
+    "targetNamespace",
+    "targetRole",
+    "execution",
+    "storage"
+  ],
+  "properties": {
+    "image": {
+      "type": "object",
+      "required": [
+        "repository",
+        "tag"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string",
+          "minLength": 1,
+          "not": {
+            "const": "latest"
+          }
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^$|^sha256:[a-f0-9]{64}$"
+        },
+        "pullPolicy": {
+          "enum": [
+            "IfNotPresent",
+            "Always",
+            "Never"
+          ]
+        }
+      }
+    },
+    "clusterId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "targetNamespace": {
+      "const": "guardian-demo"
+    },
+    "targetRole": {
+      "const": "pod-reader"
+    },
+    "execution": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "recoveryMode": {
+          "enum": [
+            "optional_advance_exact",
+            "fresh_human_only"
+          ]
+        },
+        "policySecret": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "properties": {
+        "keep": {
+          "const": true
+        }
+      }
+    }
+  }
+}

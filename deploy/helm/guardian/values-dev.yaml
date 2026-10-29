@@ -1,0 +1,6 @@
+# Docker Desktop: host.docker.internal; Kind on Linux: use the host bridge IP.
+# Override model.endpoint for the actual reachable, protected model server.
+model:
+  endpoint: http://172.18.0.1:11435
+collector:
+  auditHostPath: /var/log/guardian-audit

@@ -457,3 +457,25 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(latest['intake']['supersedes_run_id'],run['run_id'])
         self.assertEqual(self.driver.applies,[])
         self.assertEqual(self.analysis.get(run['run_id'],self.human)['report'],run['report'])
+
+    def test_restored_authority_is_revoked_and_runtime_guard_blocks_enabled_policy(self):
+        from cryptography.fernet import Fernet
+        from scripts.guardian_backup import create,restore
+        from backend.app.services.governance_store import GovernanceStore
+        import shutil
+        run,review=self.prepared();decision=self.approve(review)
+        state=Path(self.temp.name)/'backup-state';state.mkdir()
+        with self.db._connect() as source:
+            import sqlite3
+            target=sqlite3.connect(state/'governance.sqlite3')
+            try:source.backup(target)
+            finally:target.close()
+        key=Path(self.temp.name)/'backup.key';key.write_bytes(Fernet.generate_key())
+        bundle=Path(self.temp.name)/'backup.fernet';create({'state':state},bundle,key,quiesced=True)
+        destination=Path(self.temp.name)/'restored';restore(bundle,destination,key)
+        restored=GovernanceStore(destination/'state/governance.sqlite3',clock=self.db.clock)
+        executor=ExecutionStore(restored,self.analysis,self.inventory,self.driver,self.verifier,self.client.app.state.authenticator,self.execution.policy)
+        self.assertFalse(executor.enabled)
+        self.assertTrue(restored.get_decision(decision['decision_id'],self.human)['revoked'])
+        with self.assertRaises(LedgerError):executor.execute(review['proposal_id'],decision['decision_id'])
+        self.assertEqual(self.driver.applies,[])

@@ -1,0 +1,7 @@
+apiVersion: v2
+name: guardian
+version: 0.2.0-rc.1
+appVersion: "0.2.0-rc.1"
+description: Single-host governed Kubernetes RBAC analysis and review
+type: application
+kubeVersion: ">=1.30.0-0"

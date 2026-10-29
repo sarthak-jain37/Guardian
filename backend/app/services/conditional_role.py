@@ -4,6 +4,7 @@ Dry run is a separate method with dryRun=All fixed internally. No create, force,
 metadata replacement, bindings or arbitrary resource/HTTP path are accepted here.
 """
 from copy import deepcopy
+from backend.app.services.kube_transport import api_call
 
 
 class ConditionalRoleDriver:
@@ -23,7 +24,7 @@ class ConditionalRoleDriver:
         path='/apis/rbac.authorization.k8s.io/v1/namespaces/{namespace}/roles/{name}'
         query=[('fieldManager','guardian-'+action_id)]
         if dry_run:query.append(('dryRun','All'))
-        return self.k8s.api_client.call_api(path,'PATCH',path_params={'namespace':namespace,'name':name},
+        return api_call(self.k8s.api_client,path,'PATCH',user_agent='guardian-executor/'+action_id,path_params={'namespace':namespace,'name':name},
             query_params=query,header_params={'Content-Type':'application/json-patch+json',
                 'User-Agent':'guardian-executor/'+action_id},body=self.patch(uid,version,rules),
             auth_settings=['BearerToken'],response_type='object',_return_http_data_only=True,_request_timeout=(5,15))
@@ -40,7 +41,7 @@ class ConditionalRoleDriver:
         if subresource:attributes['subresource']=subresource
         body={'apiVersion':'authorization.k8s.io/v1','kind':'SubjectAccessReview',
             'spec':{'user':subject.username,'uid':subject.uid,'groups':subject.groups,'resourceAttributes':attributes}}
-        value=self.k8s.api_client.call_api('/apis/authorization.k8s.io/v1/subjectaccessreviews','POST',body=body,
+        value=api_call(self.k8s.api_client,'/apis/authorization.k8s.io/v1/subjectaccessreviews','POST',body=body,
             auth_settings=['BearerToken'],response_type='object',_return_http_data_only=True,_request_timeout=(5,15))
         status=value.get('status',{})
         return {'allowed':status.get('allowed'),'denied':status.get('denied',False),

@@ -34,14 +34,14 @@ def workspace():
                 else:
                     with st.form('analysis_intake'):
                         role=st.selectbox('Role',roles,format_func=lambda r:r['name'])
-                        hours=st.number_input('Observation window (hours)',min_value=1,max_value=2160,value=168)
+                        minutes=st.number_input('Observation window (minutes)',min_value=5,max_value=129600,value=10080)
                         note=st.text_area('Optional workload context',max_chars=2000,
                             help='Describe rare or scheduled work. You do not need to identify unused permissions.')
                         if st.form_submit_button('Queue analysis'):
                             now=datetime.now(timezone.utc)
                             end=min(now,datetime.fromisoformat(progress.replace('Z','+00:00'))) if progress else now
                             result=client.call('POST','/analysis/runs',body={**params,'role_name':role['name'],
-                                'window':{'start':(end-timedelta(hours=hours)).isoformat(),'end':end.isoformat()},
+                                'window':{'start':(end-timedelta(minutes=minutes)).isoformat(),'end':end.isoformat()},
                                 'idempotency_key':'ui-'+uuid4().hex,'trigger':'initial','context_note':note})
                             st.session_state['guardian_selected_run']=result['run_id'];st.rerun()
             else:st.info('A human credential with review permission is needed to start analyses.')

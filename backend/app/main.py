@@ -74,7 +74,8 @@ async def lifespan(app: FastAPI):
         import tomllib
         from pathlib import Path
         policy=ExecutionPolicy.model_validate(tomllib.loads(Path(execution_file).read_text()))
-    else:policy=ExecutionPolicy(cluster_id=app.state.analysis_cluster_id)
+    else:policy=ExecutionPolicy(cluster_id=app.state.analysis_cluster_id,recovery_mode=os.getenv('GUARDIAN_RECOVERY_MODE','optional_advance_exact'))
+    if policy.recovery_mode!=os.getenv('GUARDIAN_RECOVERY_MODE',policy.recovery_mode):raise ValueError('recovery_mode_configuration_mismatch')
     if policy.cluster_id!=app.state.analysis_cluster_id:raise ValueError('execution_cluster_mismatch')
     app.state.execution=ExecutionStore(app.state.governance,app.state.analysis,app.state.evidence_inventory,
         ConditionalRoleDriver(k8s),FunctionalVerifier(app.state.governance),app.state.authenticator,policy)
@@ -141,3 +142,13 @@ app.include_router(execution_router)
 def health_check():
     executor=getattr(app.state,"execution",None)
     return {"health": "ok", "execution_enabled": bool(executor and executor.enabled)}
+
+
+@app.get("/ready")
+async def readiness():
+    from fastapi.responses import JSONResponse
+    try:
+        with app.state.governance._connect() as connection:connection.execute("SELECT 1").fetchone()
+        await app.state.redis.ping()
+    except Exception:return JSONResponse({"ready":False,"reason":"database_or_cache_unavailable"},status_code=503)
+    return {"ready":True,"execution_enabled":app.state.execution.enabled}

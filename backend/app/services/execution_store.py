@@ -101,7 +101,7 @@ class ExecutionStore:
         self.inventory.baseline_provider=self.baseline_id
 
     @property
-    def enabled(self):return self.policy.enabled and self.auth is not None
+    def enabled(self):return self.policy.enabled and self.auth is not None and not (self.db.path.parent/'restore-required').exists()
 
     def profile(self,e):
         matches=[p for p in self.policy.profiles if (p.namespace,p.role_name)==(e.target.namespace,e.target.name)]

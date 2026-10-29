@@ -7,6 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from contracts.usage_summary_v1 import Window
+from backend.app.services.kube_transport import api_call
 from backend.app.services.audit_usage import iso, timestamp
 
 
@@ -79,7 +80,7 @@ class AuditFollower:
         with self.usage.db.transaction() as db:
             db.execute('INSERT INTO collector_probes VALUES (?,?,?,NULL)',(nonce,self.source_id,iso(self.usage.clock())))
         try:
-            result=client.call_api('/version','GET',header_params={'User-Agent':'guardian-audit-probe/'+nonce},
+            result=api_call(client,'/version','GET',user_agent='guardian-audit-probe/'+nonce,
                 auth_settings=['BearerToken'],response_type='object',_return_http_data_only=False,_request_timeout=(5,10))
             if result[1]!=200:raise ValueError('probe_failed')
         except Exception:

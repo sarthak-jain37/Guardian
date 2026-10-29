@@ -1,0 +1,15 @@
+# Replace image repository/digest and endpoint with actual approved lab artifacts.
+image:
+  repository: registry.example.edu/team/guardian
+  tag: "0.2.0-rc.1"
+model:
+  endpoint: https://model.example.edu/ollama
+execution:
+  enabled: false
+storage:
+  size: 50Gi
+  workerSize: 5Gi
+  redisSize: 5Gi
+# Required for the supported single-host local-volume SQLite topology.
+nodeSelector:
+  guardian-storage: "true"

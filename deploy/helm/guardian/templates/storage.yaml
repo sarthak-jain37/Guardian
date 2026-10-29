@@ -1,0 +1,18 @@
+{{- range $item := list (dict "name" "state" "size" .Values.storage.size) (dict "name" "worker" "size" .Values.storage.workerSize) (dict "name" "redis" "size" .Values.storage.redisSize) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $.Release.Name }}-{{ $item.name }}
+  {{- if $.Values.storage.keep }}
+  annotations: {helm.sh/resource-policy: keep}
+  {{- end }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- if $.Values.storage.className }}
+  storageClassName: {{ $.Values.storage.className | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $item.size }}
+{{- end }}

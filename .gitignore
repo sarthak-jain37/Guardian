@@ -46,3 +46,13 @@ Thumbs.db
 
 # Checked-in telemetry boundary examples
 !k8s/*.example.json
+
+# Versioned deployment/scenario artifacts (private runtime files stay in data/)
+!deploy/**/*.yaml
+!deploy/**/*.json
+!demo/**/*.yaml
+!eval/guardian/*.json
+!docs/release/*.json
+/output/
+/tmp/
+*.tgz
