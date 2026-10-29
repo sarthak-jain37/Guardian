@@ -1,6 +1,7 @@
 # Authenticated governance foundation
 
-Phase 1 adds the authority/storage boundary. Kubernetes execution remains disabled.
+Phase 1 adds the authority/storage boundary. Phase 4 extends it with separately
+prepared [governed action and recovery](execution.md); execution defaults disabled.
 The old `/approval/*/decision`, `/approval/*/revert`, `/baselines/*/apply`,
 `/baselines/*/rollback` and `/telemetry/permission-proposals/*/decision` routes
 return `410 legacy_execution_retired`. Their historical read endpoints remain.
@@ -57,7 +58,7 @@ requests. Larger bodies return `413`. Publication/report arrays also retain thei
 existing contract bounds.
 
 Send credentials in `Authorization: Bearer <token>`. `/governance/me` returns the
-server-derived principal and `execution_available=false`. Do not put bearer values
+server-derived principal and configured execution capability (false by default). Do not put bearer values
 in URLs, model inputs, committed `.env` files or screenshots. The registry contains
 digests only and is atomically replaced with mode `0600` by the issuance CLI.
 
@@ -73,8 +74,8 @@ Every governance request reloads the registry. Expiry/removal/scope changes appl
 without restarting the backend. Missing/invalid authentication returns `401`;
 insufficient scope returns `403`; a missing/corrupt configured registry or ledger
 returns `503`. Without `GUARDIAN_AUTH_FILE`, no governance access is granted.
-Existing monitoring endpoints remain the legacy local interface; comprehensive
-dashboard/evidence access integration is scheduled in phases 2–3.
+Existing monitoring endpoints remain the legacy local interface. Phase 3's
+analysis/review workspace and Phase 4's action workspace use scoped API access.
 
 ## Review and decision API
 
@@ -107,9 +108,11 @@ Example decision body (the actor and UTC timestamps come from the server):
 resume records. In phase 1 they do not themselves resume a running graph, reject an
 old Redis queue entry or regenerate analysis. Those adapters/dispatcher are phase
 3. `approve_remediation` and `adopt_baseline` return `503` without recording any
-authority or delivery. Client actor/authority/deadline/recovery fields are rejected.
-No positive decision can be enabled by accepting residual risk or supplying
-passing model-produced gates. Exact recovery consent belongs to phase 4.
+authority or delivery unless the Phase 4 backend independently prepared that exact
+action and the operator configured execution. Client actor/authority/deadline
+fields are rejected. Residual risk acceptance or supplied passing gates alone
+cannot enable a positive decision. Phase 4 adds optional separate exact recovery
+consent (`opt_in_recovery`, default false, with `expected_recovery_hash`).
 
 Review expiry is server publication time plus 24 hours. Publication replay cannot
 renew it. Conflicting contents under an existing ID, skipped case revisions,

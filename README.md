@@ -8,11 +8,13 @@ Project completion is tracked in [implementation phases](docs/implementation-pha
 The current integrated laptop workflow is in [analysis and review](docs/analysis.md),
 with [audit evidence/history](docs/evidence.md) and [Ollama model setup](docs/models.md).
 The default laptop model is now `qwen3.5:4b` through Ollama; GGUF instructions below
-apply to the optional llama.cpp profile. Phases 1–3 have local implementation and
-verification; governed cluster action, deployment and final evaluation remain.
+apply to the optional llama.cpp profile. Phases 1–4 have local implementation and
+verification; [governed action and recovery](docs/execution.md) uses recording
+boundaries for local acceptance. Live deployment/pilot and final evaluation remain.
 
 Phase 1 retires the legacy mutation routes and adds [authenticated governance](docs/governance.md).
-Monitoring remains available; applying/reverting RBAC and positive execution approvals are disabled until the governed executor is implemented.
+Monitoring remains available. Execution defaults disabled; Phase 4 requires a
+private controlled-scope policy, real verification harness and exact human approval.
 Observed changes never create an approved baseline automatically. Older Redis baseline records are retained as unverified history.
 
 ## Current Project Structure

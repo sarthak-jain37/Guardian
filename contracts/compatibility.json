@@ -1,11 +1,11 @@
 {
   "schema_version": "guardian.contract-compatibility.v1",
-  "release": "guardian.integrated-preview.v1",
-  "status": "local_preview_verified_execution_acceptance_pending",
+  "release": "guardian.governed-action.v1",
+  "status": "local_recording_execution_verified_live_acceptance_pending",
   "source_plan": "Guardian Final Team Architecture and Implementation Plan v4.0",
   "base_commit": "997603d",
   "release_commit": null,
-  "decision_record": "contracts/decisions/0006-integrated-preview.md",
+  "decision_record": "contracts/decisions/0007-governed-action.md",
   "runtime_versions": {
     "graph_version": "guardian.graph.v7",
     "state_version": "guardian.state.v7",
@@ -57,23 +57,23 @@
     {
       "name": "readiness",
       "schema_id": "guardian.readiness.v1",
-      "producer": "deterministic_orchestration_checks",
+      "producer": "deterministic_orchestration_and_backend_checks",
       "consumers": [
         "backend",
         "dashboard"
       ],
-      "acceptance": "local_preview_verified_execution_pending"
+      "acceptance": "local_recording_actuator_integration_verified_live_acceptance_pending"
     },
     {
       "name": "proposal",
       "schema_id": "guardian.proposal.v2",
-      "producer": "orchestration",
+      "producer": "orchestration_preview_and_backend_action_preparation",
       "consumers": [
         "backend",
         "dashboard",
         "executor"
       ],
-      "acceptance": "local_preview_verified_execution_pending"
+      "acceptance": "local_recording_actuator_integration_verified_live_acceptance_pending"
     },
     {
       "name": "test_decision",
@@ -181,7 +181,7 @@
       "consumers": [
         "orchestration"
       ],
-      "acceptance": "pending"
+      "acceptance": "local_recording_actuator_integration_verified_live_acceptance_pending"
     },
     {
       "name": "preflight",
@@ -190,7 +190,7 @@
       "consumers": [
         "orchestration"
       ],
-      "acceptance": "pending"
+      "acceptance": "local_recording_actuator_integration_verified_live_acceptance_pending"
     },
     {
       "name": "execution_receipt",
@@ -199,7 +199,7 @@
       "consumers": [
         "orchestration"
       ],
-      "acceptance": "pending"
+      "acceptance": "local_recording_actuator_integration_verified_live_acceptance_pending"
     }
   ],
   "capabilities": {
@@ -212,6 +212,11 @@
       "preview"
     ],
     "execution_available": false,
-    "live_lab_acceptance": false
+    "live_lab_acceptance": false,
+    "execution_implementation_available": true,
+    "execution_default_enabled": false,
+    "backend_action_modes": [
+      "governed_backend_preparation"
+    ]
   }
 }

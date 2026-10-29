@@ -27,8 +27,9 @@ Report review is deliberately outside the execution interrupt. A blocked report
 with no proposal is still reviewable. Review outcome is separate from the graph's
 analysis status: acknowledging a BLOCKED report records NO_CHANGE, preserving the
 original BLOCKED analysis. Neither this review nor a ready-looking model response
-creates action authority. Positive approval/adoption remains HTTP 503; no execution
-port is wired. Phase 4 will independently implement/revalidate that transaction.
+creates action authority. Phase 4 adds separate backend preparation, action review
+and independently revalidated execution; see [execution.md](execution.md). Positive
+approval/adoption remains HTTP 503 for an unprepared action or disabled executor.
 
 This extends the same private governance database, scoped credentials, server
 clocks and immutable audit trail. Original `/governance/reviews` records remain
@@ -113,7 +114,8 @@ available collector watermark (or shows missing coverage); a week means seven
 actual days. Historical report browsing does not require a live inventory request.
 Refresh reports, inspect evidence and record a nonwriting review. Request context
 to observe a new case revision with fresh evidence/model calls; the old report
-remains available. Approval is visibly disabled. Use **Capture fresh evidence and
+remains available. The source preview's approval is disabled; separately prepared
+governed actions appear below when configured. Use **Capture fresh evidence and
 analyse again** after expiry; old credentials/decisions cannot renew authority.
 
 Optional automatic analysis: set `GUARDIAN_ANALYSIS_NAMESPACES=guardian-demo` for

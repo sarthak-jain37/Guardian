@@ -1,0 +1,26 @@
+# Phase 4 operator configuration template. Disabled until the live pilot is ready.
+# Copy outside tracked source, replace identities/digests and install a real,
+# reviewed behavioral harness. See docs/execution.md; no canned passing harness.
+schema_version = "guardian.execution-policy.v1"
+enabled = false
+cluster_id = "client-dev"
+namespaces = ["guardian-demo"]
+recovery_mode = "optional_advance_exact" # or fresh_human_only
+recovery_seconds = 600
+
+[[profiles]]
+profile_id = "pod-reader-behavior.v1"
+namespace = "guardian-demo"
+role_name = "pod-reader"
+target_uid = "REPLACE_WITH_ROLE_UID"
+subject_uid = "REPLACE_WITH_SERVICEACCOUNT_UID"
+workload_uid = "REPLACE_WITH_WORKLOAD_UID"
+image_digest = "REPLACE_WITH_RUNNING_IMAGE_DIGEST"
+argv = ["/opt/guardian/verify-pod-reader"]
+environment_keys = ["KUBECONFIG"]
+timeout_seconds = 30
+propagation_attempts = 2
+observation_seconds = 10
+
+[profiles.artifact_hashes]
+"/opt/guardian/verify-pod-reader" = "0000000000000000000000000000000000000000000000000000000000000000"

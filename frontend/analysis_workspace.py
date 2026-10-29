@@ -8,7 +8,7 @@ from frontend.review_client import ReviewClient
 
 def workspace():
     st.title('Analysis and review')
-    st.caption('Analyse a dedicated namespaced Role, inspect evidence and record your review. Cluster changes are disabled.')
+    st.caption('Analyse a dedicated namespaced Role, inspect evidence and record your review. Governed actions have separate backend checks and approval.')
     token=st.text_input('Reviewer access token',type='password',key='guardian_review_token',
         help='Use your operator-issued credential. It is kept only in this browser session.')
     if not token:
@@ -98,6 +98,8 @@ def workspace():
             if run['decision']:
                 st.success(run['decision']['kind']+' recorded by '+run['decision']['actor'])
                 st.caption('Original analysis is preserved. Review outcome: '+run['decision']['review_outcome'])
+        from frontend.execution_workspace import workspace as execution_workspace
+        execution_workspace(client,identity,scope,run)
         if run['request']:
             with st.expander('Usage coverage, inventory and provenance'):
                 evidence=client.call('GET','/evidence/snapshots/'+run['request']['snapshot_id'])
