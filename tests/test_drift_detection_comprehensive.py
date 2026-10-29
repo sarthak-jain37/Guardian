@@ -89,10 +89,10 @@ class TestComprehensiveDriftAndBaseline(unittest.TestCase):
         self.assertNotEqual(canonical_hash(crole), canonical_hash(role))
 
     def test_canonical_hash_deep_normalization(self):
-        """Whitespace, capitalization, rule shuffling, and key shuffling produce identical hash."""
+        """Whitespace, rule shuffling, and key shuffling produce identical hash."""
         rules1 = [
-            {"verbs": ["GET", "list"], "resources": ["Pods", "SERVICES"], "apiGroups": [""]},
-            {"verbs": ["Watch"], "resources": ["Nodes"], "apiGroups": ["metrics.k8s.io"]},
+            {"verbs": ["get", "list"], "resources": ["pods", "services"], "apiGroups": [""]},
+            {"verbs": ["watch"], "resources": ["nodes"], "apiGroups": ["metrics.k8s.io"]},
         ]
         rules2 = [
             {"apiGroups": ["metrics.k8s.io"], "resources": ["nodes"], "verbs": ["watch"]},

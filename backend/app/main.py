@@ -24,6 +24,10 @@ from backend.app.core.auth import Authenticator
 from backend.app.core.body_limit import GovernanceBodyLimit
 from backend.app.services.governance_store import GovernanceStore
 from backend.app.api.routes.governance import router as governance_router
+from backend.app.api.routes.evidence import router as evidence_router
+from backend.app.services.usage_store import UsageStore
+from backend.app.services.evidence_inventory import EvidenceInventory
+from backend.app.services.evidence_archive import EvidenceArchive
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,6 +45,14 @@ async def lifespan(app: FastAPI):
     
     app.state.redis = redis
     app.state.k8s = k8s
+    app.state.analysis_cluster_id = os.getenv("GUARDIAN_CLUSTER_ID", "local")
+    app.state.usage = await asyncio.to_thread(UsageStore, app.state.governance)
+    app.state.evidence_inventory = EvidenceInventory(app.state.usage, k8s,
+        controlled_namespaces=os.getenv("GUARDIAN_CONTROLLED_NAMESPACES", "").split(","))
+    app.state.evidence_archive = None
+    if os.getenv("GUARDIAN_ARCHIVE_DIRECTORY") and os.getenv("GUARDIAN_ARCHIVE_KEYS"):
+        app.state.evidence_archive = EvidenceArchive(app.state.usage, os.environ["GUARDIAN_ARCHIVE_DIRECTORY"],
+            os.environ["GUARDIAN_ARCHIVE_KEYS"])
     app.state.telemetry = Telemetry(redis)
     from backend.app.services.permission_proposals import PermissionProposals
     app.state.permission_proposals = PermissionProposals(redis,k8s,app.state.telemetry.cluster)
@@ -91,6 +103,7 @@ app.include_router(telemetry_router)
 app.include_router(dangerous_permissions_router)
 app.include_router(approval_router)
 app.include_router(governance_router)
+app.include_router(evidence_router)
 
 
 

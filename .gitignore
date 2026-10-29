@@ -41,6 +41,7 @@ Thumbs.db
 *.sqlite3-shm
 *.auth.json
 *.auth.json.lock
+*.archive-keys.json
 
 # Checked-in telemetry boundary examples
 !k8s/*.example.json

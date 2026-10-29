@@ -105,8 +105,8 @@ class TestBaselineService(unittest.TestCase):
         hash2 = canonical_hash(state_2)
         self.assertEqual(hash1, hash2)
 
-    def test_canonical_hash_case_insensitive(self):
-        """Secrets vs secrets -> same hash"""
+    def test_canonical_hash_preserves_case_sensitive_kubernetes_values(self):
+        """Kubernetes names and rule values preserve case"""
         state_1 = {
             "Role_default_secret_reader": {
                 "kind": "Role",
@@ -121,7 +121,7 @@ class TestBaselineService(unittest.TestCase):
                 "rules": [{"verbs": ["get"], "resources": ["secrets"], "apiGroups": [""]}],
             }
         }
-        self.assertEqual(canonical_hash(state_1), canonical_hash(state_2))
+        self.assertNotEqual(canonical_hash(state_1), canonical_hash(state_2))
 
     def test_canonical_hash_whitespace_irrelevant(self):
         """Different YAML/dict formatting -> same hash"""

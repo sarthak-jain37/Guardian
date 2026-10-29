@@ -9,8 +9,6 @@ from kubernetes.client.exceptions import ApiException
 logger = logging.getLogger(__name__)
 
 IGNORED_METADATA_FIELDS = {
-    "uid",
-    "resourceVersion",
     "creationTimestamp",
     "managedFields",
     "generation",
@@ -28,6 +26,29 @@ class KubernetesService:
         self.api_client = ApiClient()
         self.rbac_api = client.RbacAuthorizationV1Api(self.api_client)
         self.core_api = client.CoreV1Api(self.api_client)
+        self.apps_api = client.AppsV1Api(self.api_client)
+        self.batch_api = client.BatchV1Api(self.api_client)
+
+    def get_workload_inventory(self, namespace):
+        objects, errors = [], []
+        readers = [(self.core_api.list_namespaced_pod, "Pod"),
+                   (self.core_api.list_namespaced_replication_controller, "ReplicationController"),
+                   (self.apps_api.list_namespaced_deployment, "Deployment"),
+                   (self.apps_api.list_namespaced_replica_set, "ReplicaSet"),
+                   (self.apps_api.list_namespaced_stateful_set, "StatefulSet"),
+                   (self.apps_api.list_namespaced_daemon_set, "DaemonSet"),
+                   (self.batch_api.list_namespaced_job, "Job"),
+                   (self.batch_api.list_namespaced_cron_job, "CronJob")]
+        for reader, kind in readers:
+            try:
+                result = reader(namespace, _request_timeout=(5, 10))
+                for item in result.items:
+                    value = self.api_client.sanitize_for_serialization(item)
+                    value["kind"] = kind
+                    objects.append(value)
+            except Exception:
+                errors.append("inventory_unavailable_" + kind.lower())
+        return {"objects": objects, "errors": errors}
 
     def get_rbac_state(self) -> dict:
         state = {}
@@ -288,4 +309,4 @@ class KubernetesService:
             "deleted": deleted,
             "errors": errors,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+        }
