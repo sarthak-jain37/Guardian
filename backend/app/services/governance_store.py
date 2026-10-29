@@ -302,7 +302,10 @@ class GovernanceStore:
             if row is None:
                 raise LedgerError("decision_not_found", 404)
             self.scoped(principal, self.review_row(db, row["proposal_id"]), "read")
-            return json.loads(row["payload"])
+            value=json.loads(row["payload"])
+            if self.execution_gate is not None:
+                value['revoked']=bool(db.execute("SELECT 1 FROM execution_revocations WHERE decision_id=? AND kind IN ('forward','all')",(decision_id,)).fetchone())
+            return value
 
     def history(self, proposal_id, principal, after_sequence=0, limit=100):
         if type(after_sequence) is not int or after_sequence < 0 or type(limit) is not int or not 1 <= limit <= 100:
@@ -319,8 +322,9 @@ class GovernanceStore:
             raise LedgerError("delivery_requires_service_identity", 403)
         with self.transaction() as db:
             now = self.now()
+            owner_filter="proposal_id NOT IN (SELECT proposal_id FROM execution_plans) AND " if self.execution_gate is not None else ""
             rows = db.execute("SELECT * FROM outbox WHERE cluster_id=? AND namespace=? AND "
-                "(status='PENDING' OR (status='CLAIMED' AND lease_expires_at<=?)) ORDER BY rowid LIMIT ?",
+                +owner_filter+"(status='PENDING' OR (status='CLAIMED' AND lease_expires_at<=?)) ORDER BY rowid LIMIT ?",
                 (claim.cluster_id, claim.namespace, now.isoformat(), claim.limit)).fetchall()
             deliveries = []
             for row in rows:

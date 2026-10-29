@@ -1,4 +1,4 @@
-"""Authenticated governance API. There is deliberately no execute endpoint yet."""
+"""Authenticated immutable reviews/decisions; execution has a separate guarded API."""
 import asyncio
 import sqlite3
 
@@ -25,8 +25,9 @@ async def call(request, operation, *args):
 
 
 @router.get("/me")
-async def me(principal: Authenticated):
-    return {"principal": principal.model_dump(), "execution_available": False}
+async def me(principal: Authenticated,request:Request):
+    store=getattr(request.app.state,"execution",None)
+    return {"principal": principal.model_dump(), "execution_available": bool(store and store.enabled)}
 
 
 @router.post("/reviews")

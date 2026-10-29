@@ -10,7 +10,7 @@ class GovernanceBodyLimit:
 
     async def __call__(self, scope, receive, send):
         if (scope["type"] != "http" or scope.get("method") != "POST"
-                or not scope.get("path", "").startswith(("/governance/", "/analysis/", "/evidence/"))):
+                or not scope.get("path", "").startswith(("/governance/", "/analysis/", "/evidence/", "/execution/"))):
             return await self.app(scope, receive, send)
         body = bytearray()
         while True:

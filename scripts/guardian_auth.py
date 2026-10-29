@@ -78,7 +78,7 @@ def main():
     create.add_argument("--kind", required=True, choices=("human", "service"))
     create.add_argument("--cluster", required=True)
     create.add_argument("--namespace", required=True)
-    create.add_argument("--permission", action="append", required=True, choices=("read", "publish", "review", "deliver", "operate"))
+    create.add_argument("--permission", action="append", required=True, choices=("read", "publish", "review", "deliver", "operate", "execute"))
     create.add_argument("--hours", type=int, default=8)
     remove = commands.add_parser("revoke")
     remove.add_argument("--token-sha256", required=True)

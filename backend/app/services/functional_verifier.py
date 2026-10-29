@@ -27,7 +27,9 @@ class FunctionalVerifier:
     def profile_hash(self,profile):
         for name,expected in profile.artifact_hashes.items():
             path=Path(name)
-            if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest()!=expected:
+            if not path.is_file():raise ValueError('functional_profile_artifact_changed')
+            with path.open('rb') as stream:actual=hashlib.file_digest(stream,'sha256').hexdigest()
+            if actual!=expected:
                 raise ValueError('functional_profile_artifact_changed')
         return canonical_hash(profile.model_dump(mode='json'))
 

@@ -16,6 +16,8 @@ class EvidenceInventory:
         self.usage,self.db,self.k8s=usage,usage.db,k8s
         self.controlled=set(controlled_namespaces)
         self.policies=policies or {}
+        self.context_provider=None
+        self.baseline_provider=None
         with self.db._connect() as db:
             db.executescript('''
             CREATE TABLE IF NOT EXISTS evidence_snapshots (
@@ -123,7 +125,9 @@ class EvidenceInventory:
         policy=self.policies.get(namespace) or EvidencePolicy(policy_version='guardian.evidence-policy.v1',allowed_namespaces=[namespace],
             profile='controlled-lab' if namespace=='guardian-demo' else 'operational',minimum_observation_seconds=300 if namespace=='guardian-demo' else 7*86400)
         evidence=EvidenceBundle(snapshot_id='snapshot-'+uuid4().hex,revision=1,source_mode='captured',target=target,subject=subject,
-            binding=binding,context=context,usage=summary,baseline_id=None,policy=policy,evidence_refs=[ref,summary.summary_id],source_errors=sorted(set(errors))[:32])
+            binding=binding,context=context,usage=summary,baseline_id=self.baseline_provider(target) if self.baseline_provider else None,
+            policy=policy,evidence_refs=[ref,summary.summary_id],source_errors=sorted(set(errors))[:32])
+        if self.context_provider:evidence=EvidenceBundle.model_validate(self.context_provider(evidence).model_dump(mode='json'))
         with self.db.transaction() as db:
             db.execute('INSERT INTO evidence_snapshots VALUES (?,?,?,?,?,?)',
                 (evidence.snapshot_id,cluster_id,namespace,target.uid,evidence.model_dump_json(),digest(evidence.model_dump(mode='json'))))

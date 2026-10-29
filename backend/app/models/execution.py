@@ -82,6 +82,7 @@ class PrepareReview(Contract):
 
 class RevokeAuthority(Contract):
     reason: str = Field(min_length=1,max_length=2000)
+    kind: Literal['forward','recovery','all'] = 'all'
 
 
 class FreshRecovery(Contract):

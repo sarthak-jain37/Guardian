@@ -17,14 +17,14 @@ from pydantic import AwareDatetime, Field, model_validator
 
 from contracts.usage_summary_v1 import Contract, ID, utc
 
-Permission = Literal["read", "publish", "review", "deliver", "operate"]
+Permission = Literal["read", "publish", "review", "deliver", "operate", "execute"]
 MAX_REGISTRY_BYTES = 65536
 
 
 class Grant(Contract):
     cluster_id: ID
     namespace: ID
-    permissions: list[Permission] = Field(min_length=1, max_length=5)
+    permissions: list[Permission] = Field(min_length=1, max_length=6)
 
     @model_validator(mode="after")
     def exact_scope(self):
@@ -43,7 +43,7 @@ class Principal(Contract):
 
     @model_validator(mode="after")
     def separation(self):
-        allowed = {"read", "review", "operate"} if self.kind == "human" else {"read", "publish", "deliver"}
+        allowed = {"read", "review", "operate"} if self.kind == "human" else {"read", "publish", "deliver", "execute"}
         if any(not set(grant.permissions) <= allowed for grant in self.grants):
             raise ValueError("human_and_service_authority_must_be_separate")
         return self
