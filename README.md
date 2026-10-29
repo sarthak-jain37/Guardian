@@ -8,9 +8,9 @@ Project completion is tracked in [implementation phases](docs/implementation-pha
 The current integrated laptop workflow is in [analysis and review](docs/analysis.md),
 with [audit evidence/history](docs/evidence.md) and [Ollama model setup](docs/models.md).
 The default laptop model is now `qwen3.5:4b` through Ollama; GGUF instructions below
-apply to the optional llama.cpp profile. Phases 1–4 have local implementation and
+apply to the optional llama.cpp profile. Phases 1–6 have implementation and local
 verification; [governed action and recovery](docs/execution.md) uses recording
-boundaries for local acceptance. Live deployment/pilot and final evaluation remain.
+boundaries for local acceptance. The [complete demo steps](docs/demo-runbook.md), [deployment guide](docs/deployment.md) and [project report](docs/project-report.md) distinguish tested local behavior from remaining human/university acceptance.
 
 Phase 1 retires the legacy mutation routes and adds [authenticated governance](docs/governance.md).
 Monitoring remains available. Execution defaults disabled; Phase 4 requires a

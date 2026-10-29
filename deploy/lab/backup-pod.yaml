@@ -19,12 +19,14 @@ spec:
       volumeMounts:
         - {name: state, mountPath: /state}
         - {name: worker, mountPath: /worker}
+        - {name: backups, mountPath: /backups}
         - {name: keys, mountPath: /keys, readOnly: true}
         - {name: backup-key, mountPath: /backup-key, readOnly: true}
         - {name: tmp, mountPath: /tmp}
   volumes:
     - {name: state, persistentVolumeClaim: {claimName: guardian-state}}
     - {name: worker, persistentVolumeClaim: {claimName: guardian-worker}}
+    - {name: backups, persistentVolumeClaim: {claimName: guardian-backup}}
     - {name: keys, secret: {secretName: guardian-archive, defaultMode: 0440}}
     - {name: backup-key, secret: {secretName: guardian-backup-key, defaultMode: 0440}}
     - {name: tmp, emptyDir: {sizeLimit: 128Mi}}

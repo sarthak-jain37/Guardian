@@ -39,12 +39,12 @@ def score_development(scenario, state):
 
 def source_provenance():
     root = Path(__file__).resolve().parents[2]
-    files = sorted([*root.joinpath("agents/guardian").rglob("*.py"),
-                    *root.joinpath("agents/guardian/config").glob("*.toml"),
-                    *root.joinpath("contracts").rglob("*.py"), root / "contracts/compatibility.json",
-                    *[root / "backend/app/services" / name for name in
-                      ("permission_scanner.py", "pod_evidence.py", "runtime_evidence.py", "telemetry.py")],
-                    root / "pyproject.toml", root / "uv.lock"])
+    paths=[]
+    for folder in ("agents", "backend", "frontend", "contracts", "scripts", "eval", "demo", "deploy"):
+        paths.extend(p for p in root.joinpath(folder).rglob("*") if p.is_file() and
+            p.suffix in (".py", ".toml", ".yaml", ".json", ".tpl") and "__pycache__" not in p.parts)
+    paths.extend(root/name for name in ("pyproject.toml", "uv.lock", "Dockerfile", ".dockerignore"))
+    files = sorted(set(paths))
     hashes = {str(path.relative_to(root)): canonical_hash(path.read_text()) for path in files}
     try:
         commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()

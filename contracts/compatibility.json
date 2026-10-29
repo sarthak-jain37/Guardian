@@ -1,15 +1,15 @@
 {
   "schema_version": "guardian.contract-compatibility.v1",
-  "release": "guardian.governed-action.v1",
-  "status": "local_recording_execution_verified_live_acceptance_pending",
+  "release": "guardian.0.2.0rc1",
+  "status": "local_release_candidate_external_acceptance_pending",
   "source_plan": "Guardian Final Team Architecture and Implementation Plan v4.0",
   "base_commit": "997603d",
   "release_commit": null,
-  "decision_record": "contracts/decisions/0007-governed-action.md",
+  "decision_record": "contracts/decisions/0008-release-candidate.md",
   "runtime_versions": {
     "graph_version": "guardian.graph.v7",
     "state_version": "guardian.state.v7",
-    "validator_version": "guardian.validator.v2",
+    "validator_version": "guardian.validator.v3",
     "canonicalization_version": "guardian.sorted-json-sha256.v1",
     "prompt_version": "guardian.bounded-stages.v4",
     "model_output_version": "guardian.model-output.v2"
@@ -217,6 +217,10 @@
     "execution_default_enabled": false,
     "backend_action_modes": [
       "governed_backend_preparation"
-    ]
+    ],
+    "helm_deployment_available": true,
+    "local_kind_pilot": true,
+    "held_out_evaluation_accepted": false,
+    "validator_version": "guardian.validator.v3"
   }
 }
