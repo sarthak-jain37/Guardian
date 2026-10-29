@@ -39,6 +39,7 @@ class Principal(Contract):
     actor: ID
     kind: Literal["human", "service"]
     grants: list[Grant] = Field(min_length=1, max_length=64)
+    credential_id: str | None = Field(default=None,exclude=True)
 
     @model_validator(mode="after")
     def separation(self):
@@ -80,23 +81,37 @@ class Authenticator:
     def __init__(self, path):
         self.path = Path(path)
 
-    def authenticate(self, token):
-        if not 32 <= len(token) <= 512 or not token.isascii():
-            raise HTTPException(401, "invalid_credential", headers={"WWW-Authenticate": "Bearer"})
+    def registry(self):
         try:
             with self.path.open("rb") as source:
                 raw = source.read(MAX_REGISTRY_BYTES + 1)
             if len(raw) > MAX_REGISTRY_BYTES:
                 raise ValueError("registry_too_large")
-            registry = Registry.model_validate(json.loads(raw))
+            return Registry.model_validate(json.loads(raw))
         except (OSError, ValueError):
             raise HTTPException(503, "authentication_registry_unavailable") from None
+    def authenticate(self, token):
+        if not 32 <= len(token) <= 512 or not token.isascii():
+            raise HTTPException(401, "invalid_credential", headers={"WWW-Authenticate": "Bearer"})
+        registry=self.registry()
         digest = hashlib.sha256(token.encode("ascii")).hexdigest()
         now = datetime.now(timezone.utc)
         for credential in registry.credentials:
             if hmac.compare_digest(credential.token_sha256, digest) and now < credential.expires_at:
-                return credential.principal
+                return credential.principal.model_copy(update={'credential_id':digest})
         raise HTTPException(401, "invalid_credential", headers={"WWW-Authenticate": "Bearer"})
+
+    def current_authority(self,actor,credential_id,cluster_id,namespace,permission='review'):
+        """Revalidate the exact credential that approved, never just an actor name."""
+        if not credential_id:return False
+        now=datetime.now(timezone.utc)
+        for credential in self.registry().credentials:
+            if (hmac.compare_digest(credential.token_sha256,credential_id) and now<credential.expires_at
+                    and credential.principal.actor==actor and credential.principal.kind=='human'):
+                try:credential.principal.require(permission,cluster_id,namespace)
+                except HTTPException:return False
+                return True
+        return False
 
 
 bearer = HTTPBearer(auto_error=False)

@@ -35,6 +35,16 @@ class DecisionInput(Contract):
     idempotency_key: Annotated[str, Field(min_length=8, max_length=128)]
     note: str = Field(default="", max_length=2000)
     accept_residual_risk: bool = Field(default=False, strict=True)
+    opt_in_recovery: bool = Field(default=False,strict=True)
+    expected_recovery_hash: ID | None = None
+
+    @model_validator(mode='after')
+    def recovery_choice(self):
+        if self.opt_in_recovery != (self.expected_recovery_hash is not None):
+            raise ValueError('recovery_requires_explicit_exact_contract')
+        if self.opt_in_recovery and self.kind!='approve_remediation':
+            raise ValueError('recovery_consent_requires_forward_remediation')
+        return self
 
 
 class DeliveryClaim(Contract):

@@ -9,7 +9,7 @@ import hashlib
 import json
 import os
 import sqlite3
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -42,6 +42,7 @@ class GovernanceStore:
     execution_available = False
 
     def __init__(self, path, *, clock=None, review_seconds=86400, execution_seconds=300, queue_capacity=64):
+        self.execution_gate = None
         self.path = Path(path).resolve()
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         for value, maximum in ((review_seconds, 604800), (execution_seconds, 300), (queue_capacity, 4096)):
@@ -151,16 +152,16 @@ class GovernanceStore:
             return self.review_row(db, row["proposal_id"])
         return row
 
-    @staticmethod
-    def view(row):
+    def view(self,row):
         payload = json.loads(row["payload"])
         return {"schema_version": "guardian.review-record.v1", "proposal_id": row["proposal_id"],
                 "status": row["status"], "published_at": row["published_at"], "review_expires_at": row["review_expires_at"],
                 "publisher": row["publisher"], "content_hash": row["content_hash"],
-                "execution_available": False, "execution_blockers": ["governed_executor_unavailable"],
+                "execution_available": bool(self.execution_gate and self.execution_gate.available(row["proposal_id"])),
+                "execution_blockers": [] if self.execution_gate and self.execution_gate.available(row["proposal_id"]) else ["governed_executor_unavailable"],
                 "proposal": payload["proposal"], "report": payload["report"]}
 
-    def publish_review(self, publication, principal):
+    def publish_review(self, publication, principal, *, _connection=None):
         publication = validate(ReviewPublication, publication)
         p = publication.proposal
         principal.require("publish", p.target.cluster_id, p.target.namespace)
@@ -173,7 +174,7 @@ class GovernanceStore:
         if p.execution_window_seconds != self.execution_seconds:
             raise LedgerError("execution_window_policy_mismatch")
         content_hash = digest(payload)
-        with self.transaction() as db:
+        with (nullcontext(_connection) if _connection is not None else self.transaction()) as db:
             now = self.now()
             existing = db.execute("SELECT proposal_id,content_hash,publisher FROM reviews WHERE proposal_id=?", (p.proposal_id,)).fetchone()
             if existing:
@@ -229,6 +230,22 @@ class GovernanceStore:
     def record_decision(self, proposal_id, request, principal):
         request = validate(DecisionInput, request)
         request_hash = digest({"proposal_id": proposal_id, **request.model_dump(mode="json")})
+        ticket = None
+        writing = request.kind in ("approve_remediation", "adopt_baseline")
+        # Slow Kubernetes/profile checks stay outside the collector's DB lock.
+        # The final commit compares a short-lived server ticket and current
+        # credential, holds, immutable plan and source revision again.
+        if writing:
+            with self._connect() as db:
+                row=self.review_row(db,proposal_id);self.scoped(principal,row,'review')
+                if principal.kind!='human' or principal.actor==row['publisher']:
+                    raise LedgerError('human_review_required',403)
+                old=db.execute('SELECT * FROM decisions WHERE actor=? AND idempotency_key=?',(principal.actor,request.idempotency_key)).fetchone()
+                if old:
+                    if old['request_hash']!=request_hash:raise LedgerError('idempotency_conflict')
+                    return json.loads(old['payload'])
+            if self.execution_gate is not None:
+                ticket=self.execution_gate.prepare_decision(proposal_id,request,principal)
         expired = False
         with self.transaction() as db:
             now = self.now()
@@ -251,16 +268,20 @@ class GovernanceStore:
                     raise LedgerError("review_revision_or_hash_changed")
                 # No backend readiness/preflight/executor exists in phase 1.
                 # A publisher's passing gates or a human flag cannot supply it.
-                if request.kind in ("approve_remediation", "adopt_baseline"):
-                    raise LedgerError("governed_executor_unavailable", 503)
+                if writing:
+                    if self.execution_gate is None:raise LedgerError("governed_executor_unavailable",503)
+                    self.execution_gate.check_ticket(db,proposal_id,request,principal,ticket)
                 count = db.execute("SELECT count(*) FROM outbox WHERE cluster_id=? AND namespace=? AND status!='ACKED'",
                                    (row["cluster_id"], row["namespace"])).fetchone()[0]
                 if count >= self.queue_capacity:
                     raise LedgerError("resume_queue_full", 503)
-                decision = GovernedDecision(decision_id="decision-" + uuid4().hex, proposal_id=proposal_id,
+                decision_id="decision-"+uuid4().hex
+                recovery_id=self.execution_gate.commit_authority(db,proposal_id,decision_id,request,principal,now) if writing else None
+                decision = GovernedDecision(decision_id=decision_id, proposal_id=proposal_id,
                     revision=p.revision, kind=request.kind, authority="human", actor=principal.actor,
                     approval_hash=p.approval_hash, policy_version=p.policy_version, target_uid=p.target.uid,
-                    approved_at=now, execution_expires_at=None)
+                    approved_at=now, execution_expires_at=now+timedelta(seconds=self.execution_seconds) if writing else None,
+                    recovery_authority_id=recovery_id)
                 value = decision.model_dump(mode="json")
                 db.execute("INSERT INTO decisions VALUES (?,?,?,?,?,?,?)", (decision.decision_id, proposal_id,
                     principal.actor, request.idempotency_key, request_hash, encode(value), request.note))
