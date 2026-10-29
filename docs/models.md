@@ -2,10 +2,12 @@
 
 The default laptop profile is `agents/guardian/config/dev-laptop.toml`: native
 Ollama, `qwen3.5:4b`, 8192 context, 2048 output tokens, temperature zero, seed 17,
-concurrency one. Inference remains local and weights still need downloading.
+concurrency one. Inference remains local and weights still need downloading. The local smoke run
+downloaded them to ignored `data/ollama-models`; use that same path below to reuse
+them. An existing Ollama service can keep its configured storage path.
 
 ```bash
-OLLAMA_NUM_PARALLEL=1 OLLAMA_MAX_LOADED_MODELS=1 ollama serve
+OLLAMA_MODELS="$PWD/data/ollama-models" OLLAMA_NUM_PARALLEL=1 OLLAMA_MAX_LOADED_MODELS=1 OLLAMA_MAX_QUEUE=4 ollama serve
 ollama pull qwen3.5:4b
 .venv/bin/python -m scripts.guardian_model_smoke
 ```
@@ -18,7 +20,9 @@ substitute another model/profile. Optional profiles `dev-llama-cpp.toml` and
 `MODEL_PATH` alone no longer selects the default runtime.
 
 Ollama uses `/api/chat`, schema `format`, `stream=false`, `think=false`, `num_ctx`
-and `num_predict`. Responses must complete with `done=true` and `done_reason=stop`;
+and `num_predict`, with input truncation and context shifting explicitly disabled.
+Use a server supporting those native fields (tested Ollama 0.40.3). An actual
+over-context request was rejected with HTTP 400. Responses must complete with `done=true` and `done_reason=stop`;
 provider, schema, byte, deadline and domain validation still apply. Errors and
 truncation become explicit failed/blocked analysis rather than partial success.
 Provider startup and requests run in a killable process under one deadline.
@@ -41,3 +45,10 @@ minimal input and made no cluster writes. This checks connectivity/structured
 output, not project evaluation quality, workload suitability or live acceptance.
 Repeat on each laptop. The broader project demo continues to label synthetic,
 recording-backend and live-model results separately.
+
+The integrated graph also passed real local investigator/planner smoke checks on
+synthetic development evidence; see `docs/analysis.md` for the scope and observed
+rejected output. [Native chat API](https://docs.ollama.com/api/chat) and
+[structured output](https://docs.ollama.com/capabilities/structured-outputs), and
+[ChatRequest controls](https://pkg.go.dev/github.com/ollama/ollama/api#ChatRequest) describe
+the transport fields; independent Guardian validators enforce the domain rules.

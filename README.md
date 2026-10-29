@@ -5,6 +5,12 @@ Guardian is a Kubernetes RBAC monitoring project designed to detect changes to R
 The project monitors Kubernetes audit events, maintains an RBAC baseline, detects differences between the expected and current RBAC state, stores detected drift events, and exposes them through a FastAPI backend and Streamlit frontend.
 
 Project completion is tracked in [implementation phases](docs/implementation-phases.md).
+The current integrated laptop workflow is in [analysis and review](docs/analysis.md),
+with [audit evidence/history](docs/evidence.md) and [Ollama model setup](docs/models.md).
+The default laptop model is now `qwen3.5:4b` through Ollama; GGUF instructions below
+apply to the optional llama.cpp profile. Phases 1–3 have local implementation and
+verification; governed cluster action, deployment and final evaluation remain.
+
 Phase 1 retires the legacy mutation routes and adds [authenticated governance](docs/governance.md).
 Monitoring remains available; applying/reverting RBAC and positive execution approvals are disabled until the governed executor is implemented.
 Observed changes never create an approved baseline automatically. Older Redis baseline records are retained as unverified history.

@@ -1,9 +1,10 @@
 # Run and verify the LangGraph implementation
 
-Phases 1–5 have local orchestration implementation and verification tooling. Real
-backend/executor acceptance, team-held-out evaluation and university deployment
-remain integration gates. The current dashboard still uses the legacy summary
-path. Start with the local commands below to exercise the new graph.
+The earlier module Phases 1–5 have local orchestration tooling. The whole-project
+Phases 1–3 now add the evidence collector, scoped HTTP worker and authenticated
+report dashboard; follow [the integrated run guide](../../docs/analysis.md).
+The module commands below remain synthetic/recording-backend checks. Governed
+execution, deployment and final benchmark acceptance remain later phases.
 
 ## 1. Environment
 
@@ -14,9 +15,9 @@ git status --short
 uv sync --locked --inexact --extra verification
 ```
 
-Current branch: `feat/langgraph_part2`. Use Python >=3.11. The shared backend now
-requires llama.cpp >=0.3.36; the `local-model` extra pins the same 0.3.36 runtime.
-Its first installation may compile native code. Do not overwrite the existing `.env`.
+Current branch: `feat/guardian-project-completion`. Use Python >=3.11. The default
+model provider is Ollama. The optional `local-model` extra pins llama.cpp 0.3.36;
+only that extra may compile native code. Do not overwrite the existing `.env`.
 The CPU demo needs no Redis, Kubernetes, Docker, GPU or GGUF file.
 
 Old phase-1–3 directories remain historical. Graph/state/report are now v7,

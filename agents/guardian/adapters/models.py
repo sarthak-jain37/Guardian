@@ -101,7 +101,7 @@ def remote_completion(config, messages, schema):
             "temperature": config.temperature,
             "response_format": {"type": "json_schema", "json_schema": {"name": "guardian", "schema": schema}}}
     if config.provider == "ollama":
-        body = {"model": config.model_name, "messages": messages, "stream": False,
+        body = {"model": config.model_name, "messages": messages, "stream": False, "truncate": False, "shift": False,
                 "think": False, "format": schema, "keep_alive": "5m",
                 "options": {"temperature": config.temperature, "num_ctx": config.context_length,
                             "num_predict": config.max_output_tokens}}

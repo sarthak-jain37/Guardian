@@ -4,7 +4,9 @@ Phase 1 adds the authority/storage boundary. Kubernetes execution remains disabl
 The old `/approval/*/decision`, `/approval/*/revert`, `/baselines/*/apply`,
 `/baselines/*/rollback` and `/telemetry/permission-proposals/*/decision` routes
 return `410 legacy_execution_retired`. Their historical read endpoints remain.
-The dashboard displays legacy findings as read only.
+The dashboard displays legacy findings as read only. Phase 3 adds a separate
+[authenticated analysis/report workspace](analysis.md), including acknowledge,
+reject and context revisions; it cannot authorize cluster writes.
 
 Startup and external apply events retain observations without approving a baseline
 or deleting old baseline data. Legacy baseline responses carry

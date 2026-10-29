@@ -1,6 +1,5 @@
 """Read-only namespace inventory -> immutable, provenance-bound EvidenceBundle."""
 import json
-from datetime import datetime, timezone
 from uuid import uuid4
 
 from contracts.usage_summary_v1 import Subject, RequestKey

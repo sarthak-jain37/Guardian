@@ -14,8 +14,8 @@ from pathlib import Path
 from contextlib import contextmanager
 
 from langgraph.checkpoint.sqlite import SqliteSaver
-from agents.guardian.contracts import Proposal, utc_now
-from agents.guardian.graph import Runtime,build_graph,report
+from agents.guardian.contracts import utc_now
+from agents.guardian.graph import Runtime,build_graph
 from agents.guardian.runner import config,configured_model
 from agents.guardian.versions import require_compatible_state
 from agents.guardian.adapters.local import PreviewVerificationPort

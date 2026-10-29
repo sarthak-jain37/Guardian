@@ -13,6 +13,7 @@ import streamlit as st
 from backend.app.core.config import BACKEND_URL
 from backend.app.services.pod_review import permission_points, event_summary, event_result, SIGNALS
 from frontend.graph_view import render_graph
+from frontend.analysis_workspace import workspace as analysis_workspace
 
 st.set_page_config(page_title='Guardian · Cluster observability',page_icon='🛡️',layout='wide',initial_sidebar_state='collapsed')
 # Refresh the whole page, including inventory and active pod details. Collection
@@ -23,7 +24,6 @@ def refresh_dashboard():
     st.caption('Live monitoring · Page updates every 10 seconds · Collection and model reviews continue in the background.')
     if time.monotonic() - st.session_state['_last_ui_render'] >= 9:
         st.rerun(scope='app')
-refresh_dashboard()
 
 st.markdown('''<style>
 .block-container{max-width:1480px;padding-top:2rem;padding-bottom:3rem}h1{font-size:2.1rem!important;letter-spacing:-.04em}h2{font-size:1.35rem!important;letter-spacing:-.02em}h3{font-size:1.1rem!important}.brand{font-size:12px;font-weight:650;letter-spacing:.16em;color:#7d9bb8;margin-bottom:12px}.muted{color:#8fa7bf}.pod-title{font-size:22px;font-weight:600;letter-spacing:-.025em}.eyebrow{font-size:11px;letter-spacing:.13em;color:#8ea7c0;text-transform:uppercase}.chip{display:inline-block;padding:4px 10px;border-radius:20px;background:rgba(85,169,144,.14);color:#72d7b8;font-size:12px;margin-right:5px}.chip.warn{background:rgba(224,168,84,.13);color:#e8bc77}[data-testid="stMetric"]{border:1px solid rgba(125,155,184,.2);border-radius:12px;padding:16px 19px;background:rgba(125,155,184,.035)}[data-testid="stMetricValue"]{font-size:1.8rem}div[data-testid="stVerticalBlockBorderWrapper"]>div{border-color:rgba(125,155,184,.2)}.stButton>button{border-radius:8px}[data-testid="stHeader"]{background:transparent}a{text-decoration:none}
@@ -555,6 +555,22 @@ def approval_queue_page():
 
 
 st.markdown('<div class="brand">GUARDIAN / CLUSTER OBSERVABILITY</div>',unsafe_allow_html=True)
+nav_pages=[st.Page(overview,title='All pods',url_path='overview',default=True),st.Page(connections,title='Connections',url_path='connections')]
+pod_page=st.Page(pod_workspace,title='Pod workspace',url_path='pod')
+approval_page=st.Page(approval_queue_page,title='Approval queue',url_path='approval')
+analysis_page=st.Page(analysis_workspace,title='Analysis and review',url_path='analysis')
+nav_pages.extend([analysis_page,pod_page,approval_page,st.Page(permissions_page,title='Permissions',url_path='permissions'),st.Page(evidence_page,title='Evidence',url_path='evidence'),st.Page(llm_page,title='LLM review',url_path='review'),st.Page(alerts_page,title='Alerts',url_path='alerts')])
+current_page=st.navigation(nav_pages,position='hidden')
+links=[]
+for item in nav_pages:
+    href='/' if item.title=='Overview' else '/'+item.url_path
+    selected=' class="active"' if item.title==current_page.title else ''
+    links.append('<a href="'+href+'" target="_self"'+selected+'>'+html.escape(item.title)+'</a>')
+st.markdown('<style>.guardian-nav{display:flex;gap:6px;flex-wrap:wrap;padding:12px 0 18px;border-bottom:1px solid #24344c;margin-bottom:22px}.guardian-nav a{color:#a9bdd2!important;padding:9px 12px;border-radius:7px;font-size:14px;text-decoration:none}.guardian-nav a:hover{background:#17283c}.guardian-nav a.active{background:#203a56;color:#eaf4ff!important;font-weight:600}</style><nav class="guardian-nav" aria-label="Guardian features">'+''.join(links)+'</nav>',unsafe_allow_html=True)
+if current_page.title=='Analysis and review':
+    current_page.run()
+    st.stop()
+refresh_dashboard()
 status=api('/telemetry/status');inventory=api('/telemetry/pods');all_pods=inventory.get('pods',[])
 bar1,bar2,bar3=st.columns([2,2,1])
 bar1.caption('CONNECTED CLUSTER');bar1.write('**'+status.get('cluster','Unknown')+'**')
@@ -563,15 +579,4 @@ default_index=namespaces.index('guardian-demo') if 'guardian-demo' in namespaces
 chosen_namespace=bar2.selectbox('Namespace',namespaces,index=default_index,key='global_namespace')
 namespace=None if chosen_namespace=='All namespaces' else chosen_namespace
 if bar3.button('Refresh data',width='stretch'):st.cache_data.clear();st.rerun()
-nav_pages=[st.Page(overview,title='All pods',url_path='overview',default=True),st.Page(connections,title='Connections',url_path='connections')]
-pod_page=st.Page(pod_workspace,title='Pod workspace',url_path='pod')
-approval_page=st.Page(approval_queue_page,title='Approval queue',url_path='approval')
-nav_pages.extend([pod_page,approval_page,st.Page(permissions_page,title='Permissions',url_path='permissions'),st.Page(evidence_page,title='Evidence',url_path='evidence'),st.Page(llm_page,title='LLM review',url_path='review'),st.Page(alerts_page,title='Alerts',url_path='alerts')])
-current_page=st.navigation(nav_pages,position='hidden')
-links=[]
-for item in nav_pages:
-    href='/' if item.title=='Overview' else '/'+item.url_path
-    selected=' class="active"' if item.title==current_page.title else ''
-    links.append('<a href="'+href+'" target="_self"'+selected+'>'+html.escape(item.title)+'</a>')
-st.markdown('<style>.guardian-nav{display:flex;gap:6px;flex-wrap:wrap;padding:12px 0 18px;border-bottom:1px solid #24344c;margin-bottom:22px}.guardian-nav a{color:#a9bdd2!important;padding:9px 12px;border-radius:7px;font-size:14px;text-decoration:none}.guardian-nav a:hover{background:#17283c}.guardian-nav a.active{background:#203a56;color:#eaf4ff!important;font-weight:600}</style><nav class="guardian-nav" aria-label="Guardian features">'+''.join(links)+'</nav>',unsafe_allow_html=True)
 current_page.run()

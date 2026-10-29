@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from agents.guardian.contracts import AnalysisRequest, EvidenceBundle
 from agents.guardian.modeling import ModelConfig
-from agents.guardian.evidence_tools import ToolResult, validate_lookup, validate_result
+from agents.guardian.evidence_tools import validate_lookup, validate_result
 from agents.guardian.policy import build_facts
 from backend.app.models.analysis import AnalysisIntake, JobComplete, ReportDecision, BudgetRequest
 from backend.app.services.governance_store import LedgerError, digest, encode, validate

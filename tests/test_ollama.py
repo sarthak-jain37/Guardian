@@ -31,6 +31,8 @@ class OllamaTests(unittest.TestCase):
         route,body=self.requests[0]
         self.assertEqual(route,'/api/chat');self.assertEqual(body['format'],self.schema)
         self.assertFalse(body['stream']);self.assertFalse(body['think'])
+        self.assertFalse(body['truncate'])
+        self.assertFalse(body['shift'])
         self.assertEqual(body['options']['num_ctx'],8192)
         self.assertIsNone(result.resolved_revision)
 

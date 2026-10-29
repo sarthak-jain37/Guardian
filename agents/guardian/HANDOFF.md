@@ -5,6 +5,11 @@ bounded model/tools/worker behavior, producer context validation and development
 evaluation. Real backend/collector/executor acceptance and university deployment
 remain external integration gates. See `VERIFY.md` for commands and exact claims.
 
+The integrated preview producer/consumer, worker, review UI and laptop run
+instructions are now in [the analysis guide](../../docs/analysis.md). The execution
+driver requirements below remain Phase 4 work; preview integration cannot supply
+positive authority or verified receipts.
+
 ## Current supported scope
 
 One dedicated namespaced Role with a known ServiceAccount/application and complete

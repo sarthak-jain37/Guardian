@@ -1,7 +1,7 @@
 """Backend inventory preparation and finite read-only watch scheduler; no model."""
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from backend.app.core.auth import Principal
 from backend.app.models.analysis import AnalysisIntake
 from backend.app.services.governance_store import digest, LedgerError
