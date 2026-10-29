@@ -106,7 +106,7 @@ async def run_drift_scan(redis: Redis, k8s: KubernetesService) -> list[dict[str,
     Steps:
     1. Get current live RBAC state from K8s API
     2. Get the ACTIVE baseline from Redis (via baseline_service)
-    3. If no active baseline exists -> create one from live state as initial ACTIVE
+    3. If no active baseline exists -> retain observed state without adoption
     4. Compare canonical hashes
     5. If match -> return empty list (no drift)
     6. If mismatch:

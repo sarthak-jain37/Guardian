@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 
 from backend.app.services.grading import PodGrader
 from backend.app.services.telemetry import Telemetry
@@ -19,6 +20,10 @@ from backend.app.api.routes.output import router as output_router
 from backend.app.api.routes.dangerous_permissions import router as dangerous_permissions_router
 from backend.app.workers.worker import run_pipeline
 from backend.app.core.config import REDIS_URL
+from backend.app.core.auth import Authenticator
+from backend.app.core.body_limit import GovernanceBodyLimit
+from backend.app.services.governance_store import GovernanceStore
+from backend.app.api.routes.governance import router as governance_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,6 +32,10 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    registry_path = os.getenv("GUARDIAN_AUTH_FILE")
+    app.state.authenticator = Authenticator(registry_path) if registry_path else None
+    app.state.governance = await asyncio.to_thread(
+        GovernanceStore, os.getenv("GUARDIAN_GOVERNANCE_DB", "data/guardian/governance.sqlite3"))
     redis = Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=30, socket_connect_timeout=10)
     k8s = KubernetesService()
     
@@ -76,10 +85,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(GovernanceBodyLimit)
 app.include_router(output_router)
 app.include_router(telemetry_router)
 app.include_router(dangerous_permissions_router)
 app.include_router(approval_router)
+app.include_router(governance_router)
 
 
 

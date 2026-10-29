@@ -40,15 +40,15 @@ class GradingAPITests(unittest.TestCase):
         self.assertTrue(self.grader.review.call_args.kwargs['force'])
         self.assertEqual(self.grader.review.call_args.args[0]['operator_question'],'Explain this pod')
 
-    def test_permission_decision_requires_explicit_valid_choice(self):
-        self.assertEqual(self.client.post('/telemetry/permission-proposals/id/decision',json={'decision':'apply','actor':'operator'}).status_code,422)
+    def test_permission_decisions_require_the_new_governance_boundary(self):
+        for decision in ('apply', 'reject', 'accept'):
+            response=self.client.post('/telemetry/permission-proposals/id/decision',json={
+                'decision':decision,'actor':'operator','note':'Keep current grants'})
+            self.assertEqual(response.status_code,410)
         self.permissions.decide.assert_not_awaited()
-        self.permissions.decide.return_value={'status':'rejected'}
-        response=self.client.post('/telemetry/permission-proposals/id/decision',json={'decision':'reject','actor':'operator','note':'Keep current grants'})
-        self.assertEqual(response.status_code,200)
-        self.permissions.decide.assert_awaited_once_with('id','reject','operator','Keep current grants')
 
-    def test_permission_proposal_conflict_is_reported(self):
+    def test_retired_route_cannot_reach_legacy_service_even_when_it_would_fail(self):
         self.permissions.decide.side_effect=ValueError('Already decided')
         response=self.client.post('/telemetry/permission-proposals/id/decision',json={'decision':'accept','actor':'operator'})
-        self.assertEqual(response.status_code,409)
+        self.assertEqual(response.status_code,410)
+        self.permissions.decide.assert_not_awaited()

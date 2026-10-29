@@ -34,5 +34,13 @@ Thumbs.db
 
 /personal_docs
 
+# Local governance ledger, SQLite WAL/SHM and private operator credentials
+/data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.auth.json
+*.auth.json.lock
+
 # Checked-in telemetry boundary examples
 !k8s/*.example.json

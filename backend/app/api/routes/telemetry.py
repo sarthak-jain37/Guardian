@@ -1,4 +1,3 @@
-from typing import Literal
 import asyncio
 from fastapi import APIRouter, Query, Request
 from backend.app.services.pod_evidence import pod_evidence
@@ -144,11 +143,6 @@ async def configuration(request: Request, namespace: str, pod: str):
         raise HTTPException(status_code=exc.status if exc.status in (403, 404) else 502,
                             detail='Could not read pod configuration from Kubernetes') from exc
 
-
-class PermissionDecision(BaseModel):
-    decision: Literal['accept','reject']
-    actor: str = Field(min_length=1,max_length=100)
-    note: str = Field(default='',max_length=2000)
 
 @router.get('/permission-proposals')
 async def permission_proposals(request: Request):

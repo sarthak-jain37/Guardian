@@ -114,7 +114,7 @@ async def trigger_manual_scan(request: Request):
 
 @router.get("/baselines/active")
 async def get_active_baseline_endpoint(request: Request, sa_key: str = "__CLUSTER__"):
-    """Fetch the currently authoritative ACTIVE baseline for an SA or cluster."""
+    """Read legacy baseline history; this is not authenticated governance authority."""
     redis = request.app.state.redis
     baseline = await baseline_service.get_active_baseline(sa_key, redis)
     if not baseline:
