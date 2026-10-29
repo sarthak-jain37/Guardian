@@ -104,6 +104,26 @@ def model_config(client):
     return getattr(client, "config", ModelConfig())
 
 
+PROMPT_SELECTION_VERSION = "guardian.prompt-selection.v1"
+
+
+def prompt_facts(facts,snapshot_id):
+    """Bound citation menus without changing facts or full-evidence validation."""
+    selected=[]
+    for fact in facts:
+        refs=fact['evidence_ids']
+        def priority(ref):
+            if ref.startswith(('usage-','request-','inventory:')):return 0
+            if ref.startswith('audit:'):return 1
+            return 2
+        menu=sorted(refs,key=lambda ref:(priority(ref),ref))[:8]
+        value={**fact,'evidence_ids':menu}
+        if len(menu)<len(refs):value.update(omitted_evidence_id_count=len(refs)-len(menu),
+            omitted_detail_ref='snapshot:'+snapshot_id+'/permission:'+fact['permission_id'])
+        selected.append(value)
+    return selected
+
+
 def scoped_schema(schema, payload):
     schema = deepcopy(schema)
     menu = payload.get("allowed_lookups")
@@ -146,7 +166,7 @@ def model_input(stage, payload, schema, client):
     record = {"input_hash": "sha256:" + hashlib.sha256(encoded).hexdigest(), "bytes": len(encoded)}
     if len(encoded) > model_config(client).max_input_bytes:
         return {**record, "omitted_reason": "input_too_large"}
-    return {**record, **value}
+    return {**record, "selection_version": PROMPT_SELECTION_VERSION, **value}
 
 
 def call_model(client, stage, payload, schema, timeout_seconds):

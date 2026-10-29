@@ -164,3 +164,27 @@ class UsageTests(unittest.TestCase):
         self.store.maximum=1
         self.ingest(event('second'))
         self.assertTrue(self.query().truncated)
+
+class RepeatedAuditStageTests(unittest.TestCase):
+    setUp=UsageTests.setUp
+    ingest=UsageTests.ingest
+    # Exercise the real server behavior without duplicating the inherited suite.
+    def test_repeated_response_started_with_new_timestamp_is_one_authorized_watch(self):
+        from copy import deepcopy
+        first=event('repeated-watch',stage='ResponseStarted',verb='watch')
+        second=deepcopy(first);second['stageTimestamp']=(START+timedelta(seconds=35)).isoformat()
+        self.ingest(first,second)
+        with self.db._connect() as db:
+            row=db.execute("SELECT conflict,payload FROM audit_requests WHERE audit_id='repeated-watch'").fetchone()
+            self.assertFalse(row['conflict']);value=json.loads(row['payload'])
+            self.assertEqual(__import__('datetime').datetime.fromisoformat(value['authorized_at']),__import__('datetime').datetime.fromisoformat(first['stageTimestamp']));self.assertEqual(__import__('datetime').datetime.fromisoformat(value['observed_at']),__import__('datetime').datetime.fromisoformat(second['stageTimestamp']))
+            self.assertEqual(db.execute("SELECT sum(count) FROM usage_hours WHERE outcome='authorized_incomplete'").fetchone()[0],1)
+
+    def test_unrelated_rbac_identity_conflict_does_not_claim_a_pod_coverage_gap(self):
+        first=event('rbac-unrelated',resource='roles',verb='watch',namespace='')
+        first['objectRef']['apiGroup']='rbac.authorization.k8s.io'
+        second=__import__('copy').deepcopy(first);second['user']['uid']='another-uid'
+        self.ingest(first,second)
+        with self.db._connect() as db:
+            self.assertTrue(db.execute("SELECT conflict FROM audit_requests WHERE audit_id='rbac-unrelated'").fetchone()[0])
+            self.assertEqual(db.execute('SELECT count(*) FROM evidence_gaps').fetchone()[0],0)

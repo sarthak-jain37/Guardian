@@ -161,3 +161,45 @@ Sources: [Helm chart practices](https://docs.helm.sh/docs/chart_best_practices/)
 [Helm resource retention](https://helm.sh/docs/v3/howto/charts_tips_and_tricks/),
 [Kind auditing](https://kind.sigs.k8s.io/docs/user/auditing/),
 [Ollama Qwen3.5 catalog](https://ollama.com/library/qwen3.5).
+
+## Laptop reverse model relay
+
+A host-side smoke does not establish pod-to-model connectivity. If the laptop
+firewall blocks Docker-to-host inference, use the optional authenticated bridge
+instead of changing firewall rules or mounting GPU devices into Kind. Set
+`model.bridge.enabled=true` and `model.endpoint=http://guardian-model-bridge:11434`.
+Create `guardian-model-bridge` with a strong `bridge.token`; only the bridge pod
+and host relay receive it. The worker still has no Kubernetes token or archive
+credentials. Forward the bridge Service to loopback port 19434 and run:
+
+```bash
+.venv/bin/python -m scripts.guardian_model_bridge relay \
+  --bridge http://127.0.0.1:19434 --model http://127.0.0.1:11434 \
+  --token-file data/pilot/model-bridge.token
+```
+
+The relay forwards only bounded `/api/tags` and `/api/chat` JSON to that fixed real
+model endpoint. It neither manufactures outputs nor executes model text. Its
+bounded queue fails unavailable if the host relay disappears. A claimed request
+is not blindly replayed after a disconnect. This is a development convenience;
+use the approved protected direct endpoint in the university lab.
+
+## Optional coordinated daily backup job
+
+The chart also packages an opt-in `backup.enabled=true` CronJob at 02:00 UTC,
+with Forbid concurrency, a separate kept backup PVC and existing backup-key
+Secret. Its custodian identity can get/patch only the three named singleton
+Deployments and list their pods. It cannot edit target RBAC. The job records its
+intent, scales backend/collector/worker to zero with version conditions, waits for
+all three pods to terminate, seals the archive and takes the coordinated snapshot.
+It restarts only unchanged deployment UIDs that are still stopped. Operator
+changes are not overwritten. This deliberately creates a short maintenance gap.
+
+A crash leaves `coordination.json` incomplete and the next job stops for operator
+reconciliation. Inspect recorded services/live state, restore their intended
+replicas and record the resolution before resetting that marker. Check failed
+Jobs/logs and wire them into the lab's approved alerting. The job retains strictly
+named encrypted bundles for 30 rolling days. Copy them and archive segments to a
+separate durable fault domain; the local PVC alone is not disaster recovery.
+The 256 MiB pilot bundle cap remains enforced. Provision/measure a full-size
+volume backup adapter before enabling this job on a larger lab dataset.

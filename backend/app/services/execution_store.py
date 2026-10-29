@@ -17,6 +17,7 @@ from agents.guardian.governance import GovernedDecision, ExecutionReceipt, actio
 from agents.guardian.policy import (canonical_hash,build_facts,global_gates,operations,rule_dicts,
     render,validate_investigation,validate_plan,risk_findings)
 from agents.guardian.review import adoption_gates
+from agents.guardian.versions import current_versions
 from backend.app.core.auth import Principal
 from backend.app.models.execution import ExecutionPolicy,PrepareReview
 from backend.app.models.governance import ReviewPublication
@@ -101,7 +102,7 @@ class ExecutionStore:
         self.inventory.baseline_provider=self.baseline_id
 
     @property
-    def enabled(self):return self.policy.enabled and self.auth is not None and not (self.db.path.parent/'restore-required').exists()
+    def enabled(self):return self.policy.enabled and self.auth is not None and self.analysis.archive is not None and not (self.db.path.parent/'restore-required').exists()
 
     def profile(self,e):
         matches=[p for p in self.policy.profiles if (p.namespace,p.role_name)==(e.target.namespace,e.target.name)]
@@ -170,8 +171,10 @@ class ExecutionStore:
         if require_source:
             revision=db.execute('SELECT MAX(revision) FROM reviews WHERE case_id=?',(p.case_id,)).fetchone()[0]
             if revision is not None and revision!=p.revision:raise LedgerError('action_review_superseded')
-        row=db.execute('SELECT report_hash FROM analysis_results WHERE run_id=?',(source['run_id'],)).fetchone()
+        row=db.execute('SELECT report_hash,payload FROM analysis_results WHERE run_id=?',(source['run_id'],)).fetchone()
         if row is None or row[0]!=plan['source_report_hash']:raise LedgerError('source_report_changed')
+        versions=json.loads(row['payload'])['report']['versions']
+        if versions!=current_versions(p.policy_version).model_dump(mode='json'):raise LedgerError('analysis_versions_changed_fresh_review_required')
         self._holds(db,p.target.cluster_id,p.target.namespace)
         current=db.execute("SELECT baseline_id FROM execution_baseline_state WHERE scope_key=? AND status='ACTIVE'",(scope_key(p.target),)).fetchone()
         if (current[0] if current else None)!=plan['expected_baseline_id']:raise LedgerError('approved_baseline_changed')
@@ -269,10 +272,17 @@ class ExecutionStore:
                     (code,row['preparation_id'],row['lease_until']))
         return True
 
+    def _retain(self,e,case_id):
+        if self.analysis.archive is None:raise LedgerError('durable_case_archive_required',503)
+        if e.usage:self.analysis.archive.pin(case_id,e.usage.summary_id,self.db.now()+timedelta(days=90))
+
     def _prepare(self,row):
+        self._require_enabled(row['cluster_id'],row['namespace'])
         body=PrepareReview.model_validate_json(row['payload'])
         source=self.analysis.get(body.source_run_id,self.service)
         if source['report_hash']!=body.expected_report_hash:raise LedgerError('analysis_report_changed')
+        if source['report']['versions']!=current_versions(source['report']['versions']['policy_version']).model_dump(mode='json'):
+            raise LedgerError('analysis_versions_changed_fresh_analysis_required')
         original=self.inventory.load(source['request']['snapshot_id'])
         if original.source_mode!='captured':raise LedgerError('captured_source_required')
         current=self._fresh(original,same_version=False)
@@ -308,6 +318,7 @@ class ExecutionStore:
             if any(g.result!='pass' for g in gates):raise LedgerError('independent_adoption_readiness_failed')
             rendered=render(current,set());rendered.update(patch=[],diff='')
             removed=set();candidate=canonical_hash({'action':'adopt_baseline','target':current.target.model_dump(mode='json')})
+        self._retain(current,'execution-'+source['case_id'])
         profile_hash=self.verifier.profile_hash(profile) if profile else None
         recovery={'mode':self.policy.recovery_mode,'original_rules_hash':canonical_hash([r.model_dump(mode='json') for r in current.target.rules]),
             'original_rules':[r.model_dump(mode='json') for r in current.target.rules],
@@ -363,6 +374,7 @@ class ExecutionStore:
         if canonical_hash(self.policy.model_dump(mode='json'))!=plan['policy_hash']:raise LedgerError('execution_policy_changed')
         old=EvidenceBundle.model_validate(plan['evidence'])
         current=self._fresh(old)
+        self._retain(current,p.case_id)
         if p.action=='remediate':
             facts,gates=build_facts(current,self.db.now())
             if any(g.result!='pass' for g in gates) or not set(p.removed_permission_ids)<={f['permission_id'] for f in facts if f['eligible']}:
@@ -499,7 +511,9 @@ class ExecutionStore:
         original=EvidenceBundle.model_validate(plan['evidence'])
         # Capture current consumers/context but compare expected post-change rules.
         expected=original.model_copy(update={'target':original.target.model_copy(update={'rules':rules,'resource_version':version})})
-        return self._fresh(expected)
+        current=self._fresh(expected)
+        self._retain(current,p.case_id)
+        return current
 
     def _verify(self,plan,p,post_version,*,restored=False):
         e=EvidenceBundle.model_validate(plan['evidence']);profile=self.profile(e)
@@ -518,7 +532,8 @@ class ExecutionStore:
             return {**result,'checks':result['checks']+[identifier]}
         for attempt in range(profile.propagation_attempts):
             try:
-                self._relationships(plan,p,post_version,e.target.rules if restored else p.result_rules)
+                current=self._relationships(plan,p,post_version,e.target.rules if restored else p.result_rules)
+                checks.append(current.snapshot_id)
                 access=self._access(e,original,removed,pre=restored)
                 functional=self.verifier.check(profile,e,'restored' if restored else 'post')
                 checks.extend([access['check_id'],functional['check_id']])
@@ -534,7 +549,8 @@ class ExecutionStore:
             remaining=profile.observation_seconds-(self.db.now()-start).total_seconds()
             if remaining>0:self.sleep(remaining)
             try:
-                self._relationships(plan,p,post_version,e.target.rules if restored else p.result_rules)
+                current=self._relationships(plan,p,post_version,e.target.rules if restored else p.result_rules)
+                checks.append(current.snapshot_id)
                 proof=self.verifier.check(profile,e,'restored' if restored else 'post');checks.append(proof['check_id'])
                 if passed(proof):return finished({'status':'passed','trigger':False,'checks':checks,'observed_seconds':(self.db.now()-start).total_seconds()})
             except Exception:pass

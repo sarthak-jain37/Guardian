@@ -6,9 +6,12 @@ from uuid import uuid4
 import requests
 
 
-def run(base,token_file,directory,*,seconds=300,timeout=900):
-    directory=Path(directory);directory.mkdir(parents=True,exist_ok=False)
-    session=requests.Session();session.trust_env=False
+def run(base,token_file,directory,*,seconds=300,timeout=900,resume=False):
+    directory=Path(directory);directory.mkdir(parents=True,exist_ok=resume)
+    session=requests.Session();session.trust_env=False;session.headers['Connection']='close'
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+    session.mount('http://',HTTPAdapter(max_retries=Retry(total=3,backoff_factor=.5,allowed_methods={'GET','POST'},status_forcelist=[502,503,504])))
     session.headers['Authorization']='Bearer '+Path(token_file).read_text().strip()
     def call(method,path,body=None):
         response=session.request(method,base.rstrip('/')+path,json=body,timeout=60);response.raise_for_status();return response.json()
@@ -16,8 +19,11 @@ def run(base,token_file,directory,*,seconds=300,timeout=900):
     ready=call('GET','/ready');status=call('GET','/evidence/status?'+scope)
     if not status['processed_through']:raise ValueError('audit_watermark_unavailable_do_not_claim_coverage')
     end=datetime.fromisoformat(status['processed_through'].replace('Z','+00:00'))
-    source=call('POST','/analysis/runs',{'cluster_id':'guardian-release','namespace':'guardian-demo','role_name':'pod-reader',
-        'window':{'start':(end-timedelta(seconds=seconds)).isoformat(),'end':end.isoformat()},'idempotency_key':'pilot-'+uuid4().hex,'trigger':'initial'})
+    if resume:
+        source=json.loads((directory/'intake.json').read_text())
+    else:
+        source=call('POST','/analysis/runs',{'cluster_id':'guardian-release','namespace':'guardian-demo','role_name':'pod-reader',
+            'window':{'start':(end-timedelta(seconds=seconds)).isoformat(),'end':end.isoformat()},'idempotency_key':'pilot-'+uuid4().hex,'trigger':'initial'})
     deadline=time.monotonic()+timeout
     while True:
         source=call('GET','/analysis/runs/'+source['run_id'])
@@ -48,8 +54,8 @@ def run(base,token_file,directory,*,seconds=300,timeout=900):
 
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--backend',default='http://127.0.0.1:18000');p.add_argument('--token-file',type=Path,default=Path('data/pilot/reviewer.token'));p.add_argument('--directory',type=Path,required=True);p.add_argument('--seconds',type=int,default=300)
-    a=p.parse_args();print(json.dumps(run(a.backend,a.token_file,a.directory,seconds=a.seconds),indent=2))
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--backend',default='http://127.0.0.1:18000');p.add_argument('--token-file',type=Path,default=Path('data/pilot/reviewer.token'));p.add_argument('--directory',type=Path,required=True);p.add_argument('--seconds',type=int,default=300);p.add_argument('--resume',action='store_true')
+    a=p.parse_args();print(json.dumps(run(a.backend,a.token_file,a.directory,seconds=a.seconds,resume=a.resume),indent=2))
 
 
 if __name__=='__main__':main()

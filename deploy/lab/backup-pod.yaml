@@ -1,0 +1,30 @@
+# Temporary custodian. Scale backend/collector/worker to zero before using it.
+# Replace the image with the tested loaded tag/digest for your release.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: guardian-backup-custodian
+  namespace: guardian-system
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: custodian
+      image: guardian:0.2.0-rc.1-r7
+      imagePullPolicy: IfNotPresent
+      command: [python, -c, "import time; time.sleep(1800)"]
+      securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+      resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+      volumeMounts:
+        - {name: state, mountPath: /state}
+        - {name: worker, mountPath: /worker}
+        - {name: keys, mountPath: /keys, readOnly: true}
+        - {name: backup-key, mountPath: /backup-key, readOnly: true}
+        - {name: tmp, mountPath: /tmp}
+  volumes:
+    - {name: state, persistentVolumeClaim: {claimName: guardian-state}}
+    - {name: worker, persistentVolumeClaim: {claimName: guardian-worker}}
+    - {name: keys, secret: {secretName: guardian-archive, defaultMode: 0440}}
+    - {name: backup-key, secret: {secretName: guardian-backup-key, defaultMode: 0440}}
+    - {name: tmp, emptyDir: {sizeLimit: 128Mi}}

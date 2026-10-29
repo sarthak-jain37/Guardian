@@ -11,6 +11,9 @@ model:
   endpoint: "http://host.docker.internal:11434"
   name: "qwen3.5:4b"
   revision: null
+  bridge:
+    enabled: false
+    secret: guardian-model-bridge
 execution:
   enabled: false
   recoveryMode: optional_advance_exact
@@ -46,3 +49,8 @@ resources:
     limits: {cpu: "1", memory: 1Gi}
 networkPolicy:
   enabled: true
+backup:
+  enabled: false
+  schedule: "0 2 * * *"
+  keySecret: guardian-backup-key
+  size: 5Gi

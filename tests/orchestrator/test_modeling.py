@@ -164,3 +164,24 @@ class ModelBoundaryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class PromptSelectionTests(unittest.TestCase):
+    def test_citation_menu_is_bounded_without_losing_full_validation_facts(self):
+        from agents.guardian.modeling import prompt_facts
+        original={'permission_id':'perm-test','eligible':False,'protected':True,'authorized_use':7,
+            'evidence_ids':['usage-current','inventory:actual','request-key']+['audit:'+str(i) for i in range(100)]}
+        selected=prompt_facts([original],'snapshot-actual')[0]
+        self.assertEqual(len(selected['evidence_ids']),8);self.assertEqual(len(original['evidence_ids']),103)
+        self.assertEqual(selected['authorized_use'],7);self.assertTrue(selected['protected']);self.assertFalse(selected['eligible'])
+        self.assertEqual(selected['omitted_evidence_id_count'],95)
+        self.assertIn('snapshot-actual',selected['omitted_detail_ref']);self.assertIn('usage-current',selected['evidence_ids'])
+
+    def test_documented_rare_context_is_a_shared_gate_before_model_interpretation(self):
+        from agents.guardian.fixtures import demo_evidence
+        from agents.guardian.policy import build_facts
+        from agents.guardian.contracts import utc_now
+        e=demo_evidence();ctx=e.context.model_copy(update={'optional_documents':['A monthly recovery workflow fetches credentials through the API; it was not exercised.']})
+        e=e.model_copy(update={'context':ctx})
+        facts,gates=build_facts(e,utc_now())
+        self.assertFalse(any(f['eligible'] for f in facts))
+        self.assertTrue(any('documented_rare_workflow_requires_validation' in g.reasons for g in gates))

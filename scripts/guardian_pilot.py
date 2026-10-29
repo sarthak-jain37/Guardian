@@ -106,7 +106,7 @@ def execution_policy(directory):
     hashes=json.loads(kube(directory,'-n','guardian-system','exec','deploy/guardian-backend','--','python','-c',code,capture_output=True,text=True).stdout)
     profile=FunctionalProfile(namespace='guardian-demo',role_name='pod-reader',target_uid=role['metadata']['uid'],subject_uid=sa['metadata']['uid'],
         workload_uid=workload['metadata']['uid'],image_digest=digest(images),argv=['/app/.venv/bin/python','/app/demo/checks/pod_reader.py','--artifacts=/state/behavior'],
-        artifact_hashes=hashes,timeout_seconds=30,observation_seconds=10)
+        artifact_hashes=hashes,environment_keys=['KUBERNETES_SERVICE_HOST','KUBERNETES_SERVICE_PORT'],timeout_seconds=30,observation_seconds=10)
     policy=ExecutionPolicy(cluster_id='guardian-release',enabled=True,namespaces=['guardian-demo'],profiles=[profile])
     # TOML supports the nested profile table; write fixed fields without a new dependency.
     lines=['schema_version="guardian.execution-policy.v1"','enabled=true','cluster_id="guardian-release"','namespaces=["guardian-demo"]',

@@ -1,0 +1,38 @@
+{{- if .Values.model.bridge.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: {{ .Release.Name }}-model-bridge}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: {{ .Release.Name }}-model-bridge}
+  template:
+    metadata:
+      labels: {app: {{ .Release.Name }}-model-bridge, guardian-component: model}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {{- include "guardian.security" . | nindent 8 }}
+      containers:
+        - name: bridge
+          image: {{ include "guardian.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- include "guardian.containerSecurity" . | nindent 12 }}
+          command: [python, -m, scripts.guardian_model_bridge, serve, --token-file, /etc/guardian/bridge/bridge.token]
+          ports: [{name: model, containerPort: 11434}]
+          resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: "1", memory: 128Mi}}
+          readinessProbe: {httpGet: {path: /health, port: model}}
+          volumeMounts:
+            - {name: token, mountPath: /etc/guardian/bridge, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: token, secret: {secretName: {{ .Values.model.bridge.secret }}, defaultMode: 0440}}
+        - {name: tmp, emptyDir: {sizeLimit: 32Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: {{ .Release.Name }}-model-bridge}
+spec:
+  selector: {app: {{ .Release.Name }}-model-bridge}
+  ports: [{name: model, port: 11434, targetPort: model}]
+{{- end }}

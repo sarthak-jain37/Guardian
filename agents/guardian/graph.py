@@ -16,7 +16,7 @@ from .review import adoption_gates, adoption_proposal, checked_gates
 from .revisions import prepare_revision, read_evidence
 from .state import GuardianState
 from .versions import GRAPH_VERSION, current_versions, require_compatible_state
-from .modeling import call_model, model_config, model_input
+from .modeling import call_model, model_config, model_input, prompt_facts
 from .evidence_tools import allowed_lookups, validate_lookup, validate_result
 from .governance import (GovernancePort, GovernedDecision, action_key, receipt_status,
                          validate_preflight, validate_receipt)
@@ -197,7 +197,7 @@ def build_graph(runtime: Runtime, checkpointer):
         if count >= e.policy.model_calls or elapsed >= active_limit:
             return {"model_status": "budget_exhausted", "model_calls": count, "retry_stage": False, "status": "BLOCKED",
                     "reason": "model_budget_exhausted", "trace": event(state, stage, outcome="budget_exhausted")}
-        payload = {"stage": stage, "facts": state["facts"], "deterministic_risk": state["risk"],
+        payload = {"stage": stage, "facts": prompt_facts(state["facts"],e.snapshot_id), "deterministic_risk": state["risk"],
                    "target_uid": e.target.uid, "workload_context": e.context.model_dump(mode="json") if e.context else None,
                    "evidence_policy": e.policy.model_dump(),
                    "observation_window": e.usage.query_window.model_dump(mode="json") if e.usage else None,

@@ -156,7 +156,23 @@ class UsageStore:
                                    (cluster,audit,request['stage'])).fetchone()
                 stage_hash = digest(request)
                 conflict = bool(old and (old['conflict'] or json.loads(old['payload'])['identity_hash']!=request['identity_hash']))
-                conflict |= bool(stage and stage['content_hash']!=stage_hash)
+                if stage and stage['content_hash']!=stage_hash:
+                    prior_stage=json.loads(stage['payload'])
+                    # A real API-server watch can emit ResponseStarted again
+                    # with a later timestamp. Keep one request, earliest known
+                    # authorization and latest observation; changed identity or
+                    # outcome still quarantines the request.
+                    stable=('identity_hash','stage','outcome')
+                    if all(prior_stage[k]==request[k] for k in stable):
+                        request['observed_at']=max(prior_stage['observed_at'],request['observed_at'])
+                        auth=[v for v in (prior_stage['authorized_at'],request['authorized_at']) if v]
+                        request['authorized_at']=min(auth) if auth else None
+                        completed=[v for v in (prior_stage['completed_at'],request['completed_at']) if v]
+                        request['completed_at']=max(completed) if completed else None
+                        stage_hash=digest(request)
+                        db.execute('UPDATE audit_stages SET content_hash=?,payload=? WHERE cluster_id=? AND audit_id=? AND stage=?',
+                            (stage_hash,encode(request),cluster,audit,request['stage']))
+                    else:conflict=True
                 db.execute('INSERT OR IGNORE INTO audit_stages VALUES (?,?,?,?,?)',
                            (cluster,audit,request['stage'],stage_hash,encode(request)))
                 stages = [json.loads(row[0]) for row in db.execute('SELECT payload FROM audit_stages WHERE cluster_id=? AND audit_id=?',(cluster,audit))]
@@ -170,8 +186,11 @@ class UsageStore:
                 if conflict:
                     current = json.loads(old['payload']) if old else current
                     current['outcome']='unknown'
-                    self._gap(db,source_id,timestamp(current['started_at']),max(now,timestamp(current['started_at'])+timedelta(microseconds=1)),
-                              'conflicting_audit_identity_or_outcome')
+                    affected=[current['key'],request['key']]
+                    if any((key.get('api_group') or '')+'/'+(key.get('resource') or '') in declaration.resources
+                            and key.get('namespace') in (None,declaration.namespace) for key in affected):
+                        self._gap(db,source_id,timestamp(current['started_at']),max(now,timestamp(current['started_at'])+timedelta(microseconds=1)),
+                                  'conflicting_audit_identity_or_outcome')
                 if old: self.counter(db,cluster,json.loads(old['payload']),-1)
                 self.counter(db,cluster,current,1)
                 hour = iso(timestamp(current['started_at']).replace(minute=0,second=0,microsecond=0))

@@ -58,3 +58,21 @@ class DeploymentTests(unittest.TestCase):
             root=Path(temp);state=root/'state';state.mkdir();(root/'outside').write_text('secret')
             (state/'link').symlink_to(root/'outside');key=root/'key';key.write_bytes(Fernet.generate_key())
             with self.assertRaisesRegex(ValueError,'symlinks'):create({'state':state},root/'bundle',key,quiesced=True)
+
+class BackupCoordinationTests(unittest.TestCase):
+    def test_backup_failure_restores_only_same_uid_and_unchanged_stopped_replicas(self):
+        from types import SimpleNamespace as N
+        from unittest.mock import MagicMock
+        from scripts.guardian_backup_job import quiesce
+        state={name:N(metadata=N(uid=name,resource_version='1'),spec=N(replicas=1)) for name in ('g-backend','g-collector','g-worker')}
+        apps=MagicMock();core=MagicMock();core.list_namespaced_pod.return_value.items=[]
+        apps.read_namespaced_deployment.side_effect=lambda name,*a,**kw:state[name]
+        def patch(name,ns,body,**kw):state[name].spec.replicas=body['spec']['replicas']
+        apps.patch_namespaced_deployment.side_effect=patch
+        with self.assertRaisesRegex(RuntimeError,'snapshot failed'):
+            with quiesce(apps,core,'guardian-system','g',sleeper=lambda _:None):
+                self.assertTrue(all(v.spec.replicas==0 for v in state.values()))
+                state['g-worker'].metadata.uid='recreated-by-operator'
+                raise RuntimeError('snapshot failed')
+        self.assertEqual(state['g-backend'].spec.replicas,1);self.assertEqual(state['g-collector'].spec.replicas,1)
+        self.assertEqual(state['g-worker'].spec.replicas,0)

@@ -79,6 +79,11 @@ class ExecutionTests(unittest.TestCase):
         self.client.app.include_router(governance_router);self.client.app.include_router(execution_router)
         self.client.app.state.governance=self.db
         self.client.app.state.usage=self.store
+        from backend.app.services.evidence_archive import EvidenceArchive
+        from cryptography.fernet import Fernet
+        keys=Path(self.temp.name)/'archive-keys.json'
+        keys.write_text(json.dumps({'active':'test','keys':{'test':Fernet.generate_key().decode()}}))
+        self.analysis.archive=EvidenceArchive(self.store,Path(self.temp.name)/'archive',keys)
         self.human=self.client.app.state.authenticator.authenticate(self.human_token)
         self.driver=RecordingRoleAPI(self.state);self.verifier=RecordingFunctionalVerifier(self.db)
         initial=self.inventory.capture('lab','guardian-demo','reader',self.intake().window)
@@ -129,6 +134,9 @@ class ExecutionTests(unittest.TestCase):
         self.assertTrue(notices);self.assertFalse(notices[0]['acknowledged'])
         self.assertFalse(self.execution.acknowledge_notification(notices[0]['notification_id'],self.human)['pause_changed'])
         self.assertEqual(self.analysis.get(run['run_id'],self.human)['report'],run['report'])
+        with self.db._connect() as db:
+            self.assertGreater(db.execute('SELECT count(*) FROM archive_pins WHERE case_id=?',(review['proposal']['case_id'],)).fetchone()[0],1)
+        self.assertTrue(any(r.startswith('snapshot-') for r in result.check_refs))
 
     def test_rejection_and_nonwriting_reviews_cause_zero_calls_to_actuator(self):
         run,review=self.prepared();p=review['proposal']

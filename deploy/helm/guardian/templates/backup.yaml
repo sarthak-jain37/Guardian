@@ -1,0 +1,79 @@
+{{- if .Values.backup.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: {{ .Release.Name }}-backup}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: {{ .Release.Name }}-backup}
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [{{ .Release.Name }}-backend, {{ .Release.Name }}-collector, {{ .Release.Name }}-worker]
+    verbs: [get, patch]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: {{ .Release.Name }}-backup}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ .Release.Name }}-backup}
+subjects: [{kind: ServiceAccount, name: {{ .Release.Name }}-backup, namespace: {{ .Release.Namespace }}}]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-backup
+  annotations: {helm.sh/resource-policy: keep}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- if .Values.storage.className }}
+  storageClassName: {{ .Values.storage.className | quote }}
+  {{- end }}
+  resources: {requests: {storage: {{ .Values.backup.size }}}}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: {{ .Release.Name }}-backup}
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      template:
+        spec:
+          serviceAccountName: {{ .Release.Name }}-backup
+          restartPolicy: Never
+          nodeSelector: {{ toYaml .Values.nodeSelector | nindent 12 }}
+          securityContext: {{- include "guardian.security" . | nindent 12 }}
+          containers:
+            - name: backup
+              image: {{ include "guardian.image" . | quote }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              securityContext: {{- include "guardian.containerSecurity" . | nindent 16 }}
+              command: [python, -m, scripts.guardian_backup_job]
+              env:
+                - {name: POD_NAMESPACE, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}
+                - {name: GUARDIAN_RELEASE, value: {{ .Release.Name | quote }}}
+              resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: "1", memory: 1Gi}}
+              volumeMounts:
+                - {name: state, mountPath: /state}
+                - {name: worker, mountPath: /worker}
+                - {name: backups, mountPath: /backups}
+                - {name: keys, mountPath: /keys, readOnly: true}
+                - {name: backup-key, mountPath: /backup-key, readOnly: true}
+                - {name: tmp, mountPath: /tmp}
+          volumes:
+            - {name: state, persistentVolumeClaim: {claimName: {{ .Release.Name }}-state}}
+            - {name: worker, persistentVolumeClaim: {claimName: {{ .Release.Name }}-worker}}
+            - {name: backups, persistentVolumeClaim: {claimName: {{ .Release.Name }}-backup}}
+            - {name: keys, secret: {secretName: {{ .Values.secrets.archiveKeys }}, defaultMode: 0440}}
+            - {name: backup-key, secret: {secretName: {{ .Values.backup.keySecret }}, defaultMode: 0440}}
+            - {name: tmp, emptyDir: {sizeLimit: 256Mi}}
+{{- end }}
