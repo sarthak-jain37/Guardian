@@ -34,6 +34,11 @@ class FunctionalVerifier:
         return canonical_hash(profile.model_dump(mode='json'))
 
     def check(self,profile,evidence,phase):
+        context=evidence.context
+        if (context is None or (profile.namespace,profile.role_name,profile.target_uid,profile.subject_uid,
+                profile.workload_uid,profile.image_digest)!=(evidence.target.namespace,evidence.target.name,
+                evidence.target.uid,evidence.subject.uid,context.workload_uid,context.image_digest)):
+            raise ValueError('functional_profile_scope_changed')
         digest=self.profile_hash(profile)
         request={'schema_version':'guardian.functional-request.v1','phase':phase,
             'cluster_id':evidence.target.cluster_id,'namespace':evidence.target.namespace,
@@ -72,6 +77,9 @@ class FunctionalVerifier:
                     (identifier,json.dumps(payload,sort_keys=True),self.db.now().isoformat()))
             return {'check_id':identifier,'profile_hash':digest,**proof.model_dump(mode='json')}
         finally:
-            if process.poll() is None:
-                os.killpg(process.pid,signal.SIGKILL);process.wait(timeout=5)
+            # Also stop descendants if a runner exited while a child retained
+            # its stdout pipe. The whole harness process group is bounded.
+            try:os.killpg(process.pid,signal.SIGKILL)
+            except ProcessLookupError:pass
+            process.wait(timeout=5)
             process.stdout.close()

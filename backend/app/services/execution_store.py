@@ -167,6 +167,9 @@ class ExecutionStore:
         source=self.analysis.row(db,plan['source_run_id'])
         case=db.execute('SELECT latest_run_id FROM analysis_cases WHERE case_id=?',(source['case_id'],)).fetchone()
         if require_source and (case is None or case[0]!=source['run_id']):raise LedgerError('source_analysis_superseded')
+        if require_source:
+            revision=db.execute('SELECT MAX(revision) FROM reviews WHERE case_id=?',(p.case_id,)).fetchone()[0]
+            if revision is not None and revision!=p.revision:raise LedgerError('action_review_superseded')
         row=db.execute('SELECT report_hash FROM analysis_results WHERE run_id=?',(source['run_id'],)).fetchone()
         if row is None or row[0]!=plan['source_report_hash']:raise LedgerError('source_report_changed')
         self._holds(db,p.target.cluster_id,p.target.namespace)
@@ -636,7 +639,7 @@ class ExecutionStore:
         with self.db._connect() as db:
             self._control(db,plan,p,require_source=False)
             if fresh:
-                self._credential(fresh['actor'],fresh['credential_id'],p);consent=fresh
+                self._fresh_authority(db,fresh,decision,p);consent=fresh
             else:
                 authority=self._authority(db,decision,p,recovery=True);consent=json.loads(authority['payload'])
             if not consent or self.db.now()>=datetime.fromisoformat(consent['expires_at']):raise LedgerError('exact_recovery_authority_missing_or_expired')
@@ -647,7 +650,7 @@ class ExecutionStore:
         rules=rule_dicts(e.target)
         self._dry_run(p.target,rules,'recover-'+key.split(':')[-1],version=version)
         with self.db.transaction() as db:
-            if fresh:self._credential(fresh['actor'],fresh['credential_id'],p)
+            if fresh:self._fresh_authority(db,fresh,decision,p)
             else:self._authority(db,decision,p,recovery=True)
             self._control(db,plan,p,require_source=False)
             if self.db.now()>=datetime.fromisoformat(consent['expires_at']):raise LedgerError('recovery_deadline_expired')
@@ -662,7 +665,7 @@ class ExecutionStore:
                 raise ValueError('restoration_response_unconfirmed')
         except Exception:
             return self._record(key,plan,decision,'manual',apply='confirmed',verification='failed',recovery='inconclusive',
-                post_version=version,recovery_id=consent['recovery_id'],checks=result['checks'],failure_class='inconclusive')
+                post_version=version,recovery_id=consent['recovery_id'],checks=result['checks'],failure_class=result.get('classification','suspected_policy_regression'))
         with self.db.transaction() as db:db.execute('UPDATE execution_actions SET recovery_confirmed=? WHERE action_key=?',(encode(restored),key))
         verification=self._verify(plan,p,restored['metadata']['resourceVersion'],restored=True)
         if verification['status']=='passed':
@@ -670,7 +673,13 @@ class ExecutionStore:
                 recovery_id=consent['recovery_id'],restored_version=restored['metadata']['resourceVersion'],checks=result['checks']+verification['checks'],
                 failure_class='suspected_policy_regression')
         return self._record(key,plan,decision,'manual',apply='confirmed',verification='failed',recovery='inconclusive',post_version=version,
-            recovery_id=consent['recovery_id'],checks=result['checks']+verification['checks'],failure_class='inconclusive')
+            recovery_id=consent['recovery_id'],checks=result['checks']+verification['checks'],failure_class=result.get('classification','suspected_policy_regression'))
+
+    def _fresh_authority(self,db,consent,decision,p):
+        self._credential(consent['actor'],consent['credential_id'],p)
+        if db.execute("SELECT 1 FROM execution_revocations WHERE decision_id=? AND kind IN ('recovery','all') AND sequence>?",
+                (decision.decision_id,consent['revocation_sequence'])).fetchone():
+            raise LedgerError('fresh_recovery_authority_revoked')
 
     def execute_next(self):
         """Durable governed outbox consumer, independent of LangGraph/model uptime."""
@@ -687,15 +696,7 @@ class ExecutionStore:
                 receipt=self.execute(row['proposal_id'],decision.decision_id)
                 if receipt is None:return False
             elif decision.kind=='request_context':
-                from backend.app.models.analysis import AnalysisIntake
-                plan=self.plan(row['proposal_id']);source=self.analysis.get(plan['source_run_id'],self.service)
-                window=source['intake']['window'];start=datetime.fromisoformat(window['start'].replace('Z','+00:00'));end=datetime.fromisoformat(window['end'].replace('Z','+00:00'))
-                with self.db._connect() as db:
-                    note=db.execute('SELECT note FROM decisions WHERE decision_id=?',(decision.decision_id,)).fetchone()[0]
-                now=self.db.now()
-                self.analysis.enqueue(AnalysisIntake(cluster_id=source['cluster_id'],namespace=source['namespace'],role_name=source['role_name'],
-                    window={'start':now-(end-start),'end':now},idempotency_key='governed-context-'+decision.decision_id,
-                    supersedes_run_id=plan['source_run_id'],context_note=f'Human context decision {decision.decision_id} by {decision.actor}: {note}'),self.service)
+                self._queue_context(row['proposal_id'],decision)
             elif decision.kind=='reject':
                 with self.db.transaction() as db:db.execute("UPDATE execution_baseline_state SET status='REJECTED' WHERE baseline_id=? AND status='PENDING_APPROVAL'",('baseline-'+row['proposal_id'],))
         except LedgerError:
@@ -717,6 +718,25 @@ class ExecutionStore:
             else:self._record(key,plan,decision,'stale')
         self.db.acknowledge_delivery(row['delivery_id'],token,self.service)
         return True
+
+    def _queue_context(self,proposal_id,decision):
+        from backend.app.models.analysis import AnalysisIntake
+        plan=self.plan(proposal_id);idem='governed-context-'+decision.decision_id
+        with self.db._connect() as db:
+            # Replaying a delivery must not rebuild a different time window or
+            # supersedes ID after the original enqueue committed.
+            if db.execute('SELECT 1 FROM analysis_runs WHERE actor=? AND idempotency_key=?',(self.service.actor,idem)).fetchone():return
+            source=self.analysis.row(db,plan['source_run_id'])
+            latest=db.execute('SELECT latest_run_id FROM analysis_cases WHERE case_id=?',(source['case_id'],)).fetchone()[0]
+            note=db.execute('SELECT note FROM decisions WHERE decision_id=?',(decision.decision_id,)).fetchone()[0]
+        source=self.analysis.get(latest,self.service)
+        window=source['intake']['window'];start=datetime.fromisoformat(window['start'].replace('Z','+00:00'));end=datetime.fromisoformat(window['end'].replace('Z','+00:00'))
+        context=f'Human context decision {decision.decision_id} by {decision.actor}: {note}'
+        if len(context)>2000:context=context[:1940]+' [full note preserved in the referenced decision]'
+        now=self.db.now()
+        self.analysis.enqueue(AnalysisIntake(cluster_id=source['cluster_id'],namespace=source['namespace'],role_name=source['role_name'],
+            window={'start':now-(end-start),'end':now},idempotency_key=idem,
+            supersedes_run_id=latest,context_note=context),self.service)
 
     def review_detail(self,proposal_id,principal):
         review=self.db.get_review(proposal_id,principal)
@@ -829,6 +849,9 @@ class ExecutionStore:
             current=self.latest_receipt(key,db)
             if not current or current.sequence!=body.expected_sequence:raise LedgerError('recovery_receipt_changed')
             self._credential(principal.actor,principal.credential_id,p);self._control(db,plan,p,require_source=False)
+            consent['authorized_at']=self.db.now().isoformat()
+            consent['revocation_sequence']=db.execute('SELECT COALESCE(MAX(sequence),0) FROM execution_revocations WHERE decision_id=?',
+                (action['decision_id'],)).fetchone()[0]
             db.execute('INSERT INTO execution_fresh_recovery VALUES (?,?,?,?,?,?,?)',
                 (identifier,key,principal.actor,principal.credential_id,body.idempotency_key,request_hash,encode(consent)))
             if not db.execute("UPDATE execution_actions SET state='fresh_recovery_queued',recovery_authority=? WHERE action_key=? AND recovery_started=0",(encode(consent),key)).rowcount:

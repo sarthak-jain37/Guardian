@@ -419,3 +419,41 @@ class ExecutionTests(unittest.TestCase):
         run,review=self.prepared();decision=self.approve(review)
         self.assertEqual(self.db.claim_deliveries(DeliveryClaim(cluster_id='lab',namespace='guardian-demo'),self.worker),[])
         self.assertTrue(self.execution.execute_next());self.assertEqual(len(self.driver.applies),1)
+
+    def test_new_action_review_invalidates_undispatched_older_approval(self):
+        run,review=self.prepared();decision=self.approve(review)
+        queued=self.execution.submit(PrepareReview(source_run_id=run['run_id'],expected_report_hash=run['report_hash'],
+            idempotency_key='replacement-action'),self.human)
+        self.execution.prepare_next()
+        self.assertEqual(self.execution.preparation(queued['preparation_id'],self.human)['status'],'DONE')
+        self.execution.execute_next()
+        old=self.execution.review_detail(review['proposal_id'],self.human)
+        self.assertEqual(old['receipt']['phase'],'stale');self.assertEqual(self.driver.applies,[])
+
+    def test_new_revocation_after_fresh_recovery_consent_stops_restore(self):
+        run,review=self.prepared();decision=self.approve(review);self.verifier.fail_post=True
+        first=self.execute(review,decision);detail=self.execution.review_detail(review['proposal_id'],self.human)
+        self.execution.fresh_recovery(first.action_key,FreshRecovery(expected_sequence=first.sequence,
+            expected_recovery_hash=detail['fresh_recovery_hash'],idempotency_key='fresh-revoke-consent'),self.human)
+        self.execution.revoke(decision['decision_id'],RevokeAuthority(reason='stop queued restoration',kind='recovery'),self.human)
+        self.execution.recover_next()
+        self.assertEqual(self.execution.latest_receipt(first.action_key).phase,'manual')
+        self.assertEqual(len(self.driver.applies),1)
+
+    def test_governed_context_delivery_replays_after_lost_ack_without_duplicate_analysis(self):
+        from unittest.mock import patch
+        run,review=self.prepared();p=review['proposal']
+        decision=self.db.record_decision(p['proposal_id'],DecisionInput(kind='request_context',
+            expected_revision=p['revision'],expected_approval_hash=p['approval_hash'],
+            idempotency_key='context-action-1',note='scheduled '+('x'*1990)),self.human)
+        with patch.object(self.db,'acknowledge_delivery',side_effect=RuntimeError('lost acknowledgement')):
+            with self.assertRaises(RuntimeError):self.execution.execute_next()
+        self.advance(601)
+        self.assertTrue(self.execution.execute_next())
+        runs=self.analysis.list('lab','guardian-demo',self.human)
+        self.assertEqual(len(runs),2)
+        latest=self.analysis.get(runs[0]['run_id'],self.human)
+        self.assertIn(decision['decision_id'],latest['intake']['context_note'])
+        self.assertEqual(latest['intake']['supersedes_run_id'],run['run_id'])
+        self.assertEqual(self.driver.applies,[])
+        self.assertEqual(self.analysis.get(run['run_id'],self.human)['report'],run['report'])

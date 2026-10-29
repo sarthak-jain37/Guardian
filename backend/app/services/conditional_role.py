@@ -4,8 +4,6 @@ Dry run is a separate method with dryRun=All fixed internally. No create, force,
 metadata replacement, bindings or arbitrary resource/HTTP path are accepted here.
 """
 from copy import deepcopy
-from urllib.parse import quote
-from agents.guardian.policy import canonical_hash
 
 
 class ConditionalRoleDriver:

@@ -40,8 +40,9 @@ class ExecutionPortTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         script=Path(self.temp.name)/'probe.py';script.write_text(source)
         executable=str(Path(sys.executable).resolve())
-        profile=FunctionalProfile(namespace='guardian-demo',role_name='reader',target_uid='uid',subject_uid='sa',
-            workload_uid='fixture-workload',image_digest='sha256:test',argv=[executable,str(script)],
+        e=demo_evidence()
+        profile=FunctionalProfile(namespace=e.target.namespace,role_name=e.target.name,target_uid=e.target.uid,subject_uid=e.subject.uid,
+            workload_uid=e.context.workload_uid,image_digest=e.context.image_digest,argv=[executable,str(script)],
             artifact_hashes={name:hashlib.sha256(Path(name).read_bytes()).hexdigest() for name in [executable,str(script)]},timeout_seconds=1)
         verifier=FunctionalVerifier(GovernanceStore(Path(self.temp.name)/'state.sqlite3'))
         return verifier,profile,script
@@ -57,3 +58,27 @@ class ExecutionPortTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'artifact_changed'):verifier.check(profile,demo_evidence(),'pre')
         profile=profile.model_copy(update={'artifact_hashes':{name:hashlib.sha256(Path(name).read_bytes()).hexdigest() for name in profile.artifact_hashes}})
         with self.assertRaisesRegex(ValueError,'output_too_large'):verifier.check(profile,demo_evidence(),'pre')
+
+    def test_valid_synthetic_subprocess_proof_is_scope_bound_and_saved_immutably(self):
+        source='''import sys,json
+from datetime import datetime,timezone
+request=json.load(sys.stdin)
+now=datetime.now(timezone.utc).isoformat()
+print(json.dumps({'schema_version':'guardian.functional-proof.v1','phase':request['phase'],
+'workload_uid':request['workload_uid'],'image_digest':request['image_digest'],
+'started_at':now,'completed_at':now,'runner_healthy':True,'dependencies_healthy':True,
+'checks':{'startup':'pass','normal':'pass','restart':'pass'},'evidence_refs':['synthetic-runner-protocol-only']}))
+'''
+        verifier,profile,script=self.harness(source)
+        result=verifier.check(profile,demo_evidence(),'pre')
+        self.assertEqual(result['phase'],'pre');self.assertEqual(set(result['checks'].values()),{'pass'})
+        with verifier.db._connect() as db:
+            stored=json.loads(db.execute('SELECT payload FROM functional_checks WHERE check_id=?',(result['check_id'],)).fetchone()[0])
+            self.assertEqual(stored['profile_hash'],result['profile_hash'])
+            import sqlite3
+            with self.assertRaises(sqlite3.IntegrityError):db.execute('DELETE FROM functional_checks')
+        wrong=profile.model_copy(update={'workload_uid':'another-workload'})
+        with self.assertRaisesRegex(ValueError,'scope_changed'):verifier.check(wrong,demo_evidence(),'pre')
+        script.write_text(source.replace("'phase':request['phase']","'phase':'post'"))
+        changed=profile.model_copy(update={'artifact_hashes':{name:hashlib.sha256(Path(name).read_bytes()).hexdigest() for name in profile.artifact_hashes}})
+        with self.assertRaisesRegex(ValueError,'scope_or_time_mismatch'):verifier.check(changed,demo_evidence(),'pre')
