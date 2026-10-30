@@ -2,6 +2,7 @@ import hashlib
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from copy import deepcopy
 from datetime import datetime,timedelta,timezone
 from pathlib import Path
@@ -188,3 +189,31 @@ class RepeatedAuditStageTests(unittest.TestCase):
         with self.db._connect() as db:
             self.assertTrue(db.execute("SELECT conflict FROM audit_requests WHERE audit_id='rbac-unrelated'").fetchone()[0])
             self.assertEqual(db.execute('SELECT count(*) FROM evidence_gaps').fetchone()[0],0)
+
+
+class CoverageHistoryTests(unittest.TestCase):
+    setUp=UsageTests.setUp
+    query=UsageTests.query
+
+    def test_long_probe_history_does_not_revalidate_policy_per_interval(self):
+        # A long-running collector produces thousands of adjacent health rows.
+        # The query must keep explicit gaps while decoding each source once per
+        # permission, rather than quadratically inside its writer transaction.
+        self.now=START+timedelta(hours=14)
+        for number in range(1000):
+            left=START+timedelta(seconds=number*50)
+            self.store.health('audit',Window(start=left,end=left+timedelta(seconds=50)),
+                self.now,f'probe:{number}')
+        gap_start=START+timedelta(hours=5)
+        gap_end=gap_start+timedelta(seconds=10)
+        self.store.gap('audit',gap_start,gap_end,'collector_restart')
+        with patch.object(CollectionPolicy,'model_validate_json',
+                wraps=CollectionPolicy.model_validate_json) as validate_source:
+            report=self.query(window=Window(start=START-timedelta(days=7),end=self.now))
+        self.assertLessEqual(validate_source.call_count,2)
+        for series in report.series:
+            self.assertEqual(series.coverage[0].status,'unavailable')
+            self.assertTrue(any(c.status=='complete_for_declared_scope' for c in series.coverage))
+            inside=[c for c in series.coverage if c.interval.start<gap_end and c.interval.end>gap_start]
+            self.assertTrue(inside)
+            self.assertTrue(all(c.status=='unavailable' and 'source_gap' in c.reason_codes for c in inside))

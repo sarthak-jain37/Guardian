@@ -233,27 +233,47 @@ class UsageStore:
               WHERE s.cluster_id=? AND s.namespace=? AND g.start<? AND g.end>?''',
               (query.cluster_id,query.namespace,iso(end),iso(start))).fetchall()
         points={start,end}
-        for row in [*rows,*gaps]:
-            points.update((max(start,timestamp(row['start'])),min(end,timestamp(row['end']))))
-        if progress and start<progress<end: points.add(progress)
-        result=[]
-        for left,right in zip(sorted(points),sorted(points)[1:]):
-            applicable=[]
-            for row in rows:
+        entering={};leaving={};gap_entering={};gap_leaving={}
+        policies={};metadata={}
+        resource=(key.api_group or '')+'/'+key.resource+('/'+key.subresource if key.subresource else '')
+        # Sweep interval boundaries instead of revalidating every source for
+        # every interval. Long windows otherwise hold the single SQLite writer
+        # for minutes and prevent both collection and review requests.
+        for index,row in enumerate(rows):
+            left=max(start,timestamp(row['start']));right=min(end,timestamp(row['end']))
+            points.update((left,right))
+            source=row['source_id']
+            if source not in policies:
                 declaration=CollectionPolicy.model_validate_json(row['declaration'])
-                resource=(key.api_group or '')+'/'+key.resource+('/'+key.subresource if key.subresource else '')
-                if (timestamp(row['start'])<=left and right<=timestamp(row['end'])
-                    and resource in declaration.resources and policy_covers(json.loads(row['audit_policy']),key,query.subject)):
-                    applicable.append(row)
-            lost=any(timestamp(g['start'])<right and timestamp(g['end'])>left for g in gaps)
-            good=[r for r in applicable if r['status']=='complete_for_declared_scope' and timestamp(r['processed_through'])>=right]
+                policies[source]=(resource in declaration.resources and
+                    policy_covers(json.loads(row['audit_policy']),key,query.subject),declaration.audit_policy_ref)
+            covered,policy_ref=policies[source]
+            if covered:
+                entering.setdefault(left,[]).append(index)
+                leaving.setdefault(right,[]).append(index)
+                metadata[index]=(row,timestamp(row['processed_through']),policy_ref)
+        for index,row in enumerate(gaps):
+            left=max(start,timestamp(row['start']));right=min(end,timestamp(row['end']))
+            points.update((left,right))
+            gap_entering.setdefault(left,[]).append(index)
+            gap_leaving.setdefault(right,[]).append(index)
+        if progress and start<progress<end: points.add(progress)
+        result=[];active=set();active_gaps=set();boundaries=sorted(points)
+        for left,right in zip(boundaries,boundaries[1:]):
+            active.difference_update(leaving.get(left,()))
+            active.update(entering.get(left,()))
+            active_gaps.difference_update(gap_leaving.get(left,()))
+            active_gaps.update(gap_entering.get(left,()))
+            applicable=[metadata[index] for index in sorted(active)]
+            lost=bool(active_gaps)
+            good=[r for r in applicable if r[0]['status']=='complete_for_declared_scope' and r[1]>=right]
             complete=bool(good) and not lost and not identity_uncertain
             reasons=[] if complete else (['source_gap'] if lost else ['identity_unresolved'] if identity_uncertain else ['coverage_unavailable'])
             chosen=good if complete else applicable
             result.append({'interval':{'start':left,'end':right},'status':'complete_for_declared_scope' if complete else 'unavailable',
-                'reason_codes':reasons,'source_ids':sorted({r['source_id'] for r in chosen})[:32],
-                'audit_policy_refs':sorted({CollectionPolicy.model_validate_json(r['declaration']).audit_policy_ref for r in chosen})[:32],
-                'health_evidence_refs':[r['coverage_id'] for r in chosen][:32],'known_lost_events':0 if complete else None})
+                'reason_codes':reasons,'source_ids':sorted({r[0]['source_id'] for r in chosen})[:32],
+                'audit_policy_refs':sorted({r[2] for r in chosen})[:32],
+                'health_evidence_refs':[r[0]['coverage_id'] for r in chosen][:32],'known_lost_events':0 if complete else None})
         return result
 
     def query(self,query,*,persist=True):
