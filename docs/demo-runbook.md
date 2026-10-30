@@ -61,6 +61,13 @@ Guardian remediation always needs a separate human decision.
    a collector interruption, wait for a genuinely complete recent interval; do
    not edit completeness fields or pretend five minutes is a week.
 
+   To follow the human approval through to its real execution result, add
+   `--follow-approval`. After approval, reuse that same directory with `--resume
+   --follow-approval`: it reads the existing action and prints its actual receipt,
+   rather than preparing another action or reporting approval as false.
+   `live_execution_verified: true` means the stored live execution completed and
+   passed verification. Independent reproduction is a separate acceptance gate.
+
 5. Inspect the **separate governed action**: exact Role diff, unchanged binding,
    real query window/watermark, UID/version, retained Pod read, pre-change SARs,
    forced admission dry-run, application proofs and residual uncertainties. The
