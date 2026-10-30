@@ -1,6 +1,6 @@
 import json
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock,MagicMock
 from backend.app.services.pod_evidence import grants_for_pod, inventory_pod, pod_evidence
 from backend.app.services.telemetry import Telemetry, normalize
 
@@ -15,6 +15,18 @@ def state():
 
 
 class PodEvidenceTests(unittest.IsolatedAsyncioTestCase):
+    def test_configuration_preserves_pod_when_optional_service_inventory_is_forbidden(self):
+        from kubernetes.client.exceptions import ApiException
+        from backend.app.services.pod_configuration import pod_configuration
+        k8s=MagicMock();k8s.api_client.sanitize_for_serialization.side_effect=lambda value:value
+        k8s.core_api.read_namespaced_pod.return_value=pod()
+        k8s.get_rbac_state.return_value=state()
+        k8s.core_api.list_namespaced_service.side_effect=ApiException(status=403)
+        result=pod_configuration(k8s,'app','web')
+        self.assertEqual(result['pod']['metadata']['uid'],'uid-1')
+        self.assertEqual(result['services'],[])
+        self.assertIn('Could not list Services: HTTP 403',result['warnings'])
+
     def test_cross_namespace_grant_preserves_scope_and_resource_names(self):
         result = grants_for_pod(pod(), state())
         self.assertEqual(result['grants'][0]['scope'], 'target')
