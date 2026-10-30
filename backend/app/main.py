@@ -148,7 +148,12 @@ def health_check():
 async def readiness():
     from fastapi.responses import JSONResponse
     try:
-        with app.state.governance._connect() as connection:connection.execute("SELECT 1").fetchone()
+        def check_storage():
+            with app.state.governance._connect() as connection:
+                connection.execute('PRAGMA busy_timeout=1000')
+                connection.execute('BEGIN IMMEDIATE')
+                connection.rollback()
+        await asyncio.to_thread(check_storage)
         await app.state.redis.ping()
     except Exception:return JSONResponse({"ready":False,"reason":"database_or_cache_unavailable"},status_code=503)
     return {"ready":True,"execution_enabled":app.state.execution.enabled}

@@ -93,9 +93,11 @@ class AnalysisTests(unittest.TestCase):
 
     def test_context_decision_atomically_creates_fresh_revision_and_keeps_prior_report(self):
         run,job=self.run_job();body=self.decision(run,'request_context',note='A monthly backup may need these permissions.')
+        self.now+=timedelta(seconds=30)
         decision=self.analysis.decide(run['run_id'],body,self.human)
         self.assertEqual(self.analysis.decide(run['run_id'],body,self.human),decision)
         successor=self.analysis.get(decision['successor_run_id'],self.human)
+        self.assertEqual(successor['intake']['window']['end'],run['intake']['window']['end'])
         self.assertEqual(successor['case_id'],run['case_id']);self.assertEqual(successor['revision'],2)
         self.assertTrue(self.analysis.prepare_next())
         successor=self.analysis.get(successor['run_id'],self.human)
@@ -189,6 +191,14 @@ class AnalysisTests(unittest.TestCase):
         current=self.analysis.get(rows[0]['run_id'],self.human)
         self.assertEqual(current['revision'],2);self.assertEqual(current['intake']['trigger'],'drift')
         self.assertIsNone(run['request']['baseline_id'])
+
+    def test_historical_cases_do_not_fill_queue_while_latest_target_case_is_pending(self):
+        self.run_job()
+        latest=self.analysis.enqueue(self.intake(idempotency_key='latest-target-case'),self.human)
+        schedule_once(self.analysis,'lab',['guardian-demo'],period_seconds=0)
+        rows=self.analysis.list('lab','guardian-demo',self.human)
+        self.assertEqual(len(rows),2)
+        self.assertEqual(rows[0]['run_id'],latest['run_id'])
 
     def test_lost_completion_ack_replays_without_changing_report_or_spending_model_calls(self):
         run=self.queued();job=self.analysis.claim(JobClaim(cluster_id='lab',namespace='guardian-demo'),self.worker)

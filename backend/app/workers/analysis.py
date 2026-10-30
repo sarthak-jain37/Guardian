@@ -15,7 +15,10 @@ def schedule_once(store,cluster,namespaces,*,period_seconds=3600):
     principal=Principal(actor='backend-analysis-scheduler',kind='service',grants=[
         {'cluster_id':cluster,'namespace':ns,'permissions':['read','publish','deliver']} for ns in namespaces])
     with store.db._connect() as db:
-        cases=db.execute('SELECT c.*,r.intake,r.status,r.created_at FROM analysis_cases c JOIN analysis_runs r ON c.latest_run_id=r.run_id WHERE c.cluster_id=? ORDER BY c.rowid DESC LIMIT 64',(cluster,)).fetchall()
+        cases=db.execute('''SELECT c.*,r.intake,r.status,r.created_at FROM analysis_cases c
+            JOIN analysis_runs r ON c.latest_run_id=r.run_id WHERE c.cluster_id=?
+            AND c.rowid IN (SELECT MAX(rowid) FROM analysis_cases WHERE cluster_id=? GROUP BY namespace,role_name)
+            ORDER BY c.rowid DESC LIMIT 64''',(cluster,cluster)).fetchall()
     cases=[c for c in cases if c['namespace'] in namespaces and c['status'] in ('DONE','FAILED')]
     if not cases:return
     state=store.inventory.k8s.get_rbac_state()

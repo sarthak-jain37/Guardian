@@ -756,9 +756,8 @@ class ExecutionStore:
         window=source['intake']['window'];start=datetime.fromisoformat(window['start'].replace('Z','+00:00'));end=datetime.fromisoformat(window['end'].replace('Z','+00:00'))
         context=f'Human context decision {decision.decision_id} by {decision.actor}: {note}'
         if len(context)>2000:context=context[:1940]+' [full note preserved in the referenced decision]'
-        now=self.db.now()
         self.analysis.enqueue(AnalysisIntake(cluster_id=source['cluster_id'],namespace=source['namespace'],role_name=source['role_name'],
-            window={'start':now-(end-start),'end':now},idempotency_key=idem,
+            window=self.analysis.fresh_window(source['cluster_id'],source['namespace'],end-start),idempotency_key=idem,
             supersedes_run_id=latest,context_note=context),self.service)
 
     def review_detail(self,proposal_id,principal):
