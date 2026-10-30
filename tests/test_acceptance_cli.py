@@ -36,3 +36,19 @@ class AcceptanceCliTests(unittest.TestCase):
         self.assertTrue(result['live_execution_verified']);self.assertEqual(result['execution_receipt']['phase'],'completed')
         self.assertTrue(all(call.args[0]=='GET' for call in session.request.call_args_list))
         self.assertEqual(len(self.driver.applies),1)
+
+    def test_terminal_review_uses_same_hash_consent_and_executor_as_streamlit(self):
+        from scripts.guardian_review import parser,perform
+        from types import SimpleNamespace
+        client=SimpleNamespace(call=lambda method,path,body=None,**kwargs:self.human_client.call(method,path,body))
+        source,review=self.prepared();p=review['proposal']
+        args=parser().parse_args(['decide',p['proposal_id'],'--kind','approve_remediation',
+            '--expected-revision',str(p['revision']),'--expected-hash',p['approval_hash']])
+        with self.assertRaisesRegex(ValueError,'residual_risk'):perform(client,args)
+        args.accept_residual_risk=True
+        decision=perform(client,args)
+        self.assertTrue(self.execution.execute_next())
+        status=perform(client,parser().parse_args(['watch',p['proposal_id']]))
+        self.assertEqual(status['receipt']['phase'],'completed');self.assertEqual(len(self.driver.applies),1)
+        self.assertEqual(perform(client,args),decision)
+        self.assertEqual(len(self.driver.applies),1)

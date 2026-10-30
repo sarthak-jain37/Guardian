@@ -68,13 +68,16 @@ def run(base,token_file,directory,*,seconds=300,timeout=900,resume=False,follow_
     decision=review.get('decision') if review else None;receipt=review.get('receipt') if review else None
     verified=bool(receipt and receipt['phase']=='completed' and receipt['apply_status']=='confirmed' and receipt['verification_status']=='passed' and receipt['baseline_activated'])
     remaining='independent reproduction' if verified else ('execution outcome: '+receipt['phase'] if receipt else
+        'human decision: '+decision['kind']+'; no execution requested' if decision and decision['kind'] not in ('approve_remediation','adopt_baseline') else
         'human exact-action approval and resulting verification' if review else 'supported analysis and independent readiness; no executable change is available')
     result={'schema_version':'guardian.live-readiness-smoke.v1','environment':'disposable_local_kind','recorded_at':datetime.now(timezone.utc).isoformat(),
         'ready':ready,'source_run_id':source['run_id'],'source_status':source['status'],'analysis_status':source['report']['status'] if source.get('report') else None,
         'model_calls':source['report']['model_calls'] if source.get('report') else 0,'model_config':source['model_config'],
+        'analysis_is_preview':True,'governed_outcome':receipt['phase'] if receipt else None,
         'query_window':evidence['usage']['query_window'] if evidence and evidence['usage'] else None,
         'preparation':preparation,'proposal_id':review['proposal']['proposal_id'] if review else None,
-        'human_approval_recorded':bool(decision),'remediation_requested':bool(decision and decision['kind']=='approve_remediation'),
+        'human_approval_recorded':bool(decision and decision['kind'] in ('approve_remediation','adopt_baseline')),
+        'human_decision_kind':decision['kind'] if decision else None,'remediation_requested':bool(decision and decision['kind']=='approve_remediation'),
         'target_writes_by_guardian':bool(receipt and receipt['apply_status']=='confirmed'),'execution_receipt':receipt,'live_execution_verified':verified,
         'duration_seconds':time.monotonic()-started,'ready_for_human_review':bool(review and review['execution_available']),
         'live_execution_acceptance':False,'remaining_gate':remaining}
