@@ -23,8 +23,12 @@ def pod_configuration(k8s, namespace, name):
                and (obj.get('kind') == 'ClusterRole' or meta.get('namespace') == g['binding_namespace']) for g in provenance):
             roles.append(obj)
     labels = pod.get('metadata', {}).get('labels', {})
-    services = []
-    for service in k8s.core_api.list_namespaced_service(namespace, _request_timeout=30).items:
+    services, warnings = [], []
+    try:service_rows=k8s.core_api.list_namespaced_service(namespace, _request_timeout=30).items
+    except client.exceptions.ApiException as exc:
+        warnings.append('Could not list Services: HTTP '+str(exc.status))
+        service_rows=[]
+    for service in service_rows:
         obj = clean(service)
         selector = obj.get('spec', {}).get('selector') or {}
         if selector and all(labels.get(key) == value for key, value in selector.items()):
@@ -33,7 +37,7 @@ def pod_configuration(k8s, namespace, name):
     readers = {'ReplicaSet': apps.read_namespaced_replica_set, 'Deployment': apps.read_namespaced_deployment,
                'StatefulSet': apps.read_namespaced_stateful_set, 'DaemonSet': apps.read_namespaced_daemon_set,
                'Job': batch.read_namespaced_job, 'CronJob': batch.read_namespaced_cron_job}
-    workloads, warnings, seen = [], [], set()
+    workloads, seen = [], set()
     owners = pod.get('metadata', {}).get('ownerReferences', [])
     while owners:
         owner = next((o for o in owners if o.get('controller')), owners[0])

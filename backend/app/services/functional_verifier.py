@@ -1,5 +1,6 @@
 """Bounded operator-selected functional harness; no model-chosen command/URL."""
 import hashlib
+import fcntl
 import json
 import os
 import selectors
@@ -34,6 +35,25 @@ class FunctionalVerifier:
         return canonical_hash(profile.model_dump(mode='json'))
 
     def check(self,profile,evidence,phase):
+        # Independent analysis and approval workers can exercise the same real
+        # workload concurrently. Serialize them across processes on the shared
+        # local disk; a busy harness is not evidence of workload failure.
+        scope=canonical_hash([profile.namespace,profile.role_name,profile.target_uid]).split(':')[1]
+        descriptor=os.open(self.db.path.parent/('functional-'+scope+'.lock'),os.O_CREAT|os.O_RDWR,0o600)
+        deadline=time.monotonic()+profile.timeout_seconds
+        try:
+            while True:
+                try:
+                    fcntl.flock(descriptor,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic()>=deadline:raise TimeoutError('functional_probe_busy')
+                    time.sleep(min(.05,max(0,deadline-time.monotonic())))
+            if time.monotonic()>=deadline:raise TimeoutError('functional_probe_timeout')
+            return self._check(profile,evidence,phase,deadline=deadline)
+        finally:os.close(descriptor)
+
+    def _check(self,profile,evidence,phase,*,deadline):
         context=evidence.context
         if (context is None or (profile.namespace,profile.role_name,profile.target_uid,profile.subject_uid,
                 profile.workload_uid,profile.image_digest)!=(evidence.target.namespace,evidence.target.name,
@@ -48,7 +68,7 @@ class FunctionalVerifier:
         # configuration included in review. Exit 0 alone never means pass.
         environment={key:os.environ[key] for key in profile.environment_keys if key in os.environ}
         environment.update(PATH='/usr/bin:/bin',LANG='C.UTF-8',PYTHONNOUSERSITE='1')
-        started=self.db.now();deadline=time.monotonic()+profile.timeout_seconds
+        started=self.db.now()
         process=subprocess.Popen(profile.argv,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
             env=environment,start_new_session=True)
         output=bytearray()

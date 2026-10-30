@@ -61,6 +61,13 @@ Guardian remediation always needs a separate human decision.
    a collector interruption, wait for a genuinely complete recent interval; do
    not edit completeness fields or pretend five minutes is a week.
 
+   To follow the human approval through to its real execution result, add
+   `--follow-approval`. After approval, reuse that same directory with `--resume
+   --follow-approval`: it reads the existing action and prints its actual receipt,
+   rather than preparing another action or reporting approval as false.
+   `live_execution_verified: true` means the stored live execution completed and
+   passed verification. Independent reproduction is a separate acceptance gate.
+
 5. Inspect the **separate governed action**: exact Role diff, unchanged binding,
    real query window/watermark, UID/version, retained Pod read, pre-change SARs,
    forced admission dry-run, application proofs and residual uncertainties. The
@@ -71,8 +78,21 @@ Guardian remediation always needs a separate human decision.
    risk acceptance, and make your separate recovery choice (unchecked by default).
    Record the governed decision. The backend rechecks current authority/evidence
    and applies only if all conditions still pass. Execution must start within
-   five minutes of approval. No coding agent has recorded this positive decision
-   for you.
+   five minutes of approval. A saved preview or readiness check is not an approval.
+
+   The terminal uses the same governed API:
+
+   ```bash
+   .venv/bin/python -m scripts.guardian_review list
+   .venv/bin/python -m scripts.guardian_review show PROPOSAL_ID
+   .venv/bin/python -m scripts.guardian_review decide PROPOSAL_ID --kind approve_remediation --expected-revision REVISION --expected-hash APPROVAL_HASH --accept-residual-risk
+   .venv/bin/python -m scripts.guardian_review watch PROPOSAL_ID
+   ```
+
+   Replace the uppercase placeholders with the exact values displayed by `show`.
+   `decide` also supports rejection, acknowledgement, context requests and baseline
+   adoption. Recovery is a separate opt-in using `--recovery-hash` from that review;
+   omitting it does not grant recovery authority. No command accepts arbitrary rules.
 
 7. Refresh and inspect the actual receipt: confirmed apply, verification passed,
    first active baseline and outcome notification. Acknowledge the notice; this

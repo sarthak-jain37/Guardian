@@ -145,6 +145,25 @@ class ExecutionTests(unittest.TestCase):
         self.assertTrue(self.execution.execute_next());self.assertEqual(self.driver.applies,[])
         self.assertEqual(self.execution.baselines('lab','guardian-demo',self.human)[0]['status'],'REJECTED')
 
+    def test_dispatch_rechecks_freshness_after_capture_and_explains_zero_writes(self):
+        from unittest.mock import patch
+        run,review=self.prepared();decision=self.approve(review)
+        original=self.execution._fresh
+        def slow_capture(*args,**kwargs):
+            evidence=original(*args,**kwargs)
+            self.advance(evidence.policy.maximum_source_lag_seconds+1)
+            return evidence
+        with patch.object(self.execution,'_fresh',side_effect=slow_capture):
+            result=self.execute(review,decision)
+        self.assertEqual(result.phase,'stale');self.assertEqual(result.apply_status,'not_started')
+        self.assertEqual(self.driver.applies,[])
+        detail=self.execution.review_detail(review['proposal_id'],self.human)
+        self.assertEqual(detail['outcome_reason'],'audit_source_too_old_for_execution')
+        self.assertTrue(any('audit_source_too_old_for_execution' in n['message'] for n in
+            self.execution.notifications('lab','guardian-demo',self.human)))
+        self.assertEqual(self.execute(review,decision).receipt_id,result.receipt_id)
+        self.assertEqual(self.driver.applies,[])
+
     def test_exact_advance_recovery_requires_opt_in_and_restoration_verification(self):
         run,review=self.prepared();decision=self.approve(review,recovery=True);self.verifier.fail_post=True
         result=self.execute(review,decision)
@@ -463,6 +482,7 @@ class ExecutionTests(unittest.TestCase):
         latest=self.analysis.get(runs[0]['run_id'],self.human)
         self.assertIn(decision['decision_id'],latest['intake']['context_note'])
         self.assertEqual(latest['intake']['supersedes_run_id'],run['run_id'])
+        self.assertEqual(self.execution.review_detail(p['proposal_id'],self.human)['context_successor_run_id'],latest['run_id'])
         self.assertEqual(self.driver.applies,[])
         self.assertEqual(self.analysis.get(run['run_id'],self.human)['report'],run['report'])
 

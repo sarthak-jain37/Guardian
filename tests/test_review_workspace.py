@@ -29,7 +29,7 @@ class ReviewWorkspaceTests(unittest.TestCase):
             app.text_input[0].set_value(self.human_token).run()
             self.assertFalse(app.exception)
             approve=[b for b in app.button if b.label.startswith('Approve')]
-            self.assertEqual(len(approve),1);self.assertTrue(approve[0].disabled)
+            self.assertEqual(len(approve),0)
             self.assertTrue(any('Actual query window' in m.value for m in app.markdown))
             action=[s for s in app.selectbox if s.label=='Review action'][0]
             action.select('acknowledge')
@@ -47,3 +47,16 @@ class ReviewWorkspaceTests(unittest.TestCase):
             app.run();app.text_input[0].set_value('invalid-token-value-with-enough-characters').run()
             self.assertFalse(app.exception);self.assertEqual(len(app.error),1)
             self.assertIn('401',app.error[0].value)
+
+    def test_analyse_again_uses_collector_watermark_instead_of_uncovered_now(self):
+        from datetime import timedelta
+        run,job=self.run_job();self.now+=timedelta(seconds=30)
+        app=AppTest.from_string('from frontend.analysis_workspace import workspace\nworkspace()')
+        with patch('frontend.review_client.requests.request',side_effect=self.request):
+            app.run();app.text_input[0].set_value(self.human_token).run()
+            next(b for b in app.button if b.label=='Capture fresh evidence and analyse again').click().run()
+            self.assertFalse(app.exception);self.assertFalse(app.error)
+        latest=self.analysis.list('lab','guardian-demo',self.human)[0]
+        successor=self.analysis.get(latest['run_id'],self.human)
+        self.assertEqual(successor['revision'],2)
+        self.assertEqual(successor['intake']['window']['end'],run['intake']['window']['end'])

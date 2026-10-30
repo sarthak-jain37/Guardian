@@ -377,6 +377,8 @@ class ExecutionStore:
         self._retain(current,p.case_id)
         if p.action=='remediate':
             facts,gates=build_facts(current,self.db.now())
+            if any(g.gate_id=='source_freshness' and 'stale_source' in g.reasons for g in gates):
+                raise LedgerError('audit_source_too_old_for_execution')
             if any(g.result!='pass' for g in gates) or not set(p.removed_permission_ids)<={f['permission_id'] for f in facts if f['eligible']}:
                 raise LedgerError('new_use_or_evidence_readiness_changed')
             profile=self.profile(current)
@@ -466,7 +468,7 @@ class ExecutionStore:
         return ExecutionReceipt.model_validate_json(row[0]) if row else None
 
     def _record(self,key,plan,decision,phase,*,apply='not_started',verification='pending',recovery='not_requested',
-                post_version=None,recovery_id=None,restored_version=None,checks=(),failure_class=None):
+                post_version=None,recovery_id=None,restored_version=None,checks=(),failure_class=None,stop_reason=None):
         p=Proposal.model_validate(plan['proposal'])
         if p.action=='adopt_baseline':verification='not_required'
         with self.db.transaction() as db:
@@ -499,10 +501,12 @@ class ExecutionStore:
                     'manual':'Recovery or application could not be confirmed; manual intervention required.',
                     'stale':'The approved action was not applied because current preconditions or authority changed.',
                     'failed':'The approved action failed before a confirmed change.'}[phase]
+                if stop_reason:message+=' Reason: '+stop_reason+'.'
                 db.execute('INSERT INTO execution_notifications VALUES (?,?,?,?,?,?)',(notification,key,decision.actor,
                     p.target.cluster_id,p.target.namespace,encode({'message':message,'receipt_id':receipt.receipt_id,'phase':phase,
                         'failure_class':failure_class,'delivered':False})))
-            self.db.event(db,p.proposal_id,'execution_'+phase,'guardian-execution-backend',self.db.now(),receipt_id=receipt.receipt_id)
+            self.db.event(db,p.proposal_id,'execution_'+phase,'guardian-execution-backend',self.db.now(),
+                receipt_id=receipt.receipt_id,**({'reason_code':stop_reason} if stop_reason else {}))
             self.analysis.event(db,plan['source_run_id'],'execution_outcome_recorded','guardian-execution-backend',
                 receipt_id=receipt.receipt_id,action_key=key,phase=phase)
         return receipt
@@ -588,8 +592,9 @@ class ExecutionStore:
                 if (live['metadata']['uid'],live['metadata']['resourceVersion'],live.get('rules',[]))!=(
                         p.target.uid,p.target.resource_version,rule_dicts(p.target)):
                     raise LedgerError('role_changed_before_dispatch')
-            except Exception:
-                return self._record(key,plan,decision,'stale')
+            except Exception as error:
+                return self._record(key,plan,decision,'stale',stop_reason=error.code if isinstance(error,LedgerError)
+                    else 'execution_precondition_check_unavailable')
             if p.action=='adopt_baseline':
                 return self._record(key,plan,decision,'completed',verification='not_required',checks=[current.snapshot_id])
             self._record(key,plan,decision,'applying')
@@ -597,7 +602,8 @@ class ExecutionStore:
                 intent=dict(db.execute('SELECT * FROM execution_actions WHERE action_key=?',(key,)).fetchone())
             try:
                 with self.db._connect() as db:self._authority(db,decision,p);self._control(db,plan,p)
-            except Exception:return self._record(key,plan,decision,'stale')
+            except Exception as error:return self._record(key,plan,decision,'stale',
+                stop_reason=error.code if isinstance(error,LedgerError) else 'execution_authority_check_unavailable')
             try:
                 response=self.driver.apply(p.target.namespace,p.target.name,p.target.uid,p.target.resource_version,
                     [r.model_dump(exclude_defaults=True) for r in p.result_rules],intent['dispatch_id'])
@@ -605,7 +611,8 @@ class ExecutionStore:
                         or response.get('rules',[])!=[r.model_dump(exclude_defaults=True) for r in p.result_rules]):
                     raise ValueError('unconfirmed_conditional_response')
             except Exception as error:
-                if getattr(error,'status',None) in (400,403,404,409,422):return self._record(key,plan,decision,'stale')
+                if getattr(error,'status',None) in (400,403,404,409,422):return self._record(key,plan,decision,'stale',
+                    stop_reason='conditional_role_request_rejected_'+str(error.status))
                 ref=self.reconcile_observation(key,plan)
                 return self._record(key,plan,decision,'manual',apply='unknown',verification='inconclusive',checks=[ref],failure_class='inconclusive')
             # Persist the acknowledged response before verification; crash recovery
@@ -715,7 +722,7 @@ class ExecutionStore:
                 self._queue_context(row['proposal_id'],decision)
             elif decision.kind=='reject':
                 with self.db.transaction() as db:db.execute("UPDATE execution_baseline_state SET status='REJECTED' WHERE baseline_id=? AND status='PENDING_APPROVAL'",('baseline-'+row['proposal_id'],))
-        except LedgerError:
+        except LedgerError as error:
             # Invalid/expired authority has no write. Preserve a durable terminal
             # receipt even when rejected before the first action was claimed.
             if decision.kind not in ('approve_remediation','adopt_baseline'):raise
@@ -731,7 +738,7 @@ class ExecutionStore:
             elif action['state']=='applying':
                 ref=self.reconcile_observation(key,plan)
                 self._record(key,plan,decision,'manual',apply='unknown',verification='inconclusive',checks=[ref],failure_class='inconclusive')
-            else:self._record(key,plan,decision,'stale')
+            else:self._record(key,plan,decision,'stale',stop_reason=error.code)
         self.db.acknowledge_delivery(row['delivery_id'],token,self.service)
         return True
 
@@ -749,9 +756,8 @@ class ExecutionStore:
         window=source['intake']['window'];start=datetime.fromisoformat(window['start'].replace('Z','+00:00'));end=datetime.fromisoformat(window['end'].replace('Z','+00:00'))
         context=f'Human context decision {decision.decision_id} by {decision.actor}: {note}'
         if len(context)>2000:context=context[:1940]+' [full note preserved in the referenced decision]'
-        now=self.db.now()
         self.analysis.enqueue(AnalysisIntake(cluster_id=source['cluster_id'],namespace=source['namespace'],role_name=source['role_name'],
-            window={'start':now-(end-start),'end':now},idempotency_key=idem,
+            window=self.analysis.fresh_window(source['cluster_id'],source['namespace'],end-start),idempotency_key=idem,
             supersedes_run_id=latest,context_note=context),self.service)
 
     def review_detail(self,proposal_id,principal):
@@ -761,8 +767,14 @@ class ExecutionStore:
         with self.db._connect() as db:
             action=db.execute('SELECT * FROM execution_actions WHERE proposal_id=?',(proposal_id,)).fetchone()
             receipt=self.latest_receipt(action['action_key'],db) if action else None
+            stopped=db.execute("SELECT details FROM events WHERE proposal_id=? AND kind IN ('execution_stale','execution_failed') ORDER BY sequence DESC LIMIT 1",(proposal_id,)).fetchone()
+            outcome_reason=json.loads(stopped[0]).get('reason_code') if stopped else None
             row=db.execute('SELECT payload FROM decisions WHERE proposal_id=?',(proposal_id,)).fetchone()
             decision=json.loads(row[0]) if row else None
+            successor=None
+            if decision and decision['kind']=='request_context':
+                successor=db.execute('SELECT run_id FROM analysis_runs WHERE actor=? AND idempotency_key=?',
+                    (self.service.actor,'governed-context-'+decision['decision_id'])).fetchone()
             if decision:
                 decision['revoked']=bool(db.execute("SELECT 1 FROM execution_revocations WHERE decision_id=? AND kind IN ('forward','all')",
                     (decision['decision_id'],)).fetchone())
@@ -774,7 +786,8 @@ class ExecutionStore:
         usage=plan['evidence'].get('usage')
         return {**review,'execution_available':review['execution_available'] and review['status']=='OPEN' and not blockers,
             'execution_blockers':review['execution_blockers']+blockers,'backend_readiness':backend_report.get('readiness'),
-            'decision':decision,'advance_recovery_consent':consent,'verification_evidence':checks,
+            'decision':decision,'context_successor_run_id':successor[0] if successor else None,
+            'advance_recovery_consent':consent,'verification_evidence':checks,'outcome_reason':outcome_reason,
             'usage_window':usage['query_window'] if usage else None,'usage_processed_through':usage['processed_through'] if usage else None,
             'source_report_hash':plan['source_report_hash'],'source_run_id':plan['source_run_id'],'verification_contract':{
             'profile':plan['profile'],'profile_hash':plan['profile_hash'],'pre_functional':plan['pre_functional'],

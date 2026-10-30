@@ -6,6 +6,7 @@ from backend.app.core.config import BACKEND_URL
 from frontend.review_client import ReviewClient
 
 
+@st.fragment(run_every='3s')
 def workspace():
     st.title('Analysis and review')
     st.caption('Analyse a dedicated namespaced Role, inspect evidence and record your review. Governed actions have separate backend checks and approval.')
@@ -33,8 +34,10 @@ def workspace():
                 if not roles:st.info('No readable Roles were found in this namespace.')
                 else:
                     with st.form('analysis_intake'):
-                        role=st.selectbox('Role',roles,format_func=lambda r:r['name'])
-                        minutes=st.number_input('Observation window (minutes)',min_value=5,max_value=129600,value=10080)
+                        default_role=next((i for i,r in enumerate(roles) if r['name']=='pod-reader'),0) if scope['namespace']=='guardian-demo' else 0
+                        role=st.selectbox('Role',roles,index=default_role,format_func=lambda r:r['name'])
+                        minutes=st.number_input('Observation window (minutes)',min_value=5,max_value=129600,
+                            value=5 if scope['namespace']=='guardian-demo' else 10080)
                         note=st.text_area('Optional workload context',max_chars=2000,
                             help='Describe rare or scheduled work. You do not need to identify unused permissions.')
                         if st.form_submit_button('Queue analysis'):
@@ -55,13 +58,16 @@ def workspace():
         run=client.call('GET','/analysis/runs/'+run_id)
         st.write('**'+run['role_name']+' · revision '+str(run['revision'])+'**')
         st.caption('Case: '+run['case_id']+' · Requested by '+run['actor']+' · '+run['created_at'])
+        st.caption('Run: '+run_id)
         if run['error']:st.warning(run['error'])
         if run['status']!='DONE':
-            st.info('Analysis status: '+run['status']+'. Refresh to check progress.')
+            st.info('Analysis status: '+run['status']+'. Progress refreshes automatically.')
         report=run['report']
         if report:
-            st.write('**Analysis result: '+report['status']+'**')
-            if report['reason']:st.warning(report['reason'])
+            preview_ready=report['reason']=='readiness_incomplete' and run['proposal'] is not None
+            st.write('**Analysis result: '+('Candidate proposed; independent action checks required' if preview_ready else report['status'])+'**')
+            if preview_ready:st.info('The saved analysis is a preview. Prepare and approve the governed action below to apply a change; its execution outcome is shown separately.')
+            elif report['reason']:st.warning(report['reason'])
             st.caption('Model: '+report['producer']+' / '+run['model_config']['model_name']+
                 ' · '+report['model_status']+' · calls '+str(report['model_calls']))
             if report['investigation']:
@@ -78,12 +84,12 @@ def workspace():
             if run['proposal']:
                 st.subheader('Exact proposed change')
                 st.code(run['proposal']['diff'],language='diff')
-                st.caption('Preview only. No change has been authorized or applied.')
+                st.caption('Saved preview. This report does not authorize changes; the governed action and its actual outcome are shown below.')
                 with st.expander('Proposed Role and unchanged binding'):st.json(run['proposal'])
             else:st.info('No supported permission removal was proposed. Review the evidence and missing context above.')
             st.write('Report review: **'+str(run['review_state'])+'**')
             st.caption('Review deadline: '+str(run['review_expires']))
-            st.button('Approve changes (unavailable)',disabled=True)
+            st.caption('Report review records feedback only. Approve an actual Role change in Governed actions and outcomes below.')
             if can_review and run['review_state']=='OPEN':
                 with st.form('report_decision_'+run_id):
                     kind=st.selectbox('Review action',['acknowledge','reject','request_context'],
@@ -120,7 +126,9 @@ def workspace():
             if st.button('Capture fresh evidence and analyse again'):
                 body={k:v for k,v in run['intake'].items() if k not in ('supersedes_run_id','idempotency_key')}
                 previous=body['window'];duration=datetime.fromisoformat(previous['end'].replace('Z','+00:00'))-datetime.fromisoformat(previous['start'].replace('Z','+00:00'))
-                now=datetime.now(timezone.utc);body.update(window={'start':(now-duration).isoformat(),'end':now.isoformat()},
+                progress=client.call('GET','/evidence/status',params=params)['processed_through']
+                now=datetime.now(timezone.utc);end=min(now,datetime.fromisoformat(progress.replace('Z','+00:00'))) if progress else now
+                body.update(window={'start':(end-duration).isoformat(),'end':end.isoformat()},
                     supersedes_run_id=run_id,idempotency_key='ui-refresh-'+uuid4().hex,trigger='manual')
                 result=client.call('POST','/analysis/runs',body=body)
                 st.session_state['guardian_selected_run']=result['run_id'];st.rerun()

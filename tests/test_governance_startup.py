@@ -37,6 +37,12 @@ class GovernanceStartupTests(unittest.TestCase):
                     self.assertFalse(client.get('/').json()['execution_enabled'])
                     self.assertEqual(client.get('/governance/me').status_code, 401)
                     self.assertTrue(path.exists())
+                    import sqlite3
+                    with sqlite3.connect(path,isolation_level=None) as locked:
+                        locked.execute('BEGIN IMMEDIATE')
+                        self.assertEqual(client.get('/ready').status_code,503)
+                        locked.rollback()
+                    self.assertEqual(client.get('/ready').status_code,200)
             self.assertEqual(redis.hset.await_count, 0)
             redis.delete.assert_not_awaited()
             snapshots = [call for call in redis.set.await_args_list if call.args[0] == 'rbac:current']

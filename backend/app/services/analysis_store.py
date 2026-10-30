@@ -111,6 +111,16 @@ class AnalysisStore:
         with self.db.transaction() as db:run_id=self._insert(db,body,principal.actor)
         return self.get(run_id,principal)
 
+    def fresh_window(self,cluster,namespace,duration,*,connection=None):
+        """Revisions end at verified collection progress, not an uncovered tail."""
+        if connection is None:
+            with self.db._connect() as db:
+                return self.fresh_window(cluster,namespace,duration,connection=db)
+        progress=connection.execute('''SELECT MAX(processed_through) FROM evidence_coverage
+            JOIN evidence_sources USING(source_id) WHERE cluster_id=? AND namespace=?''',(cluster,namespace)).fetchone()[0]
+        end=min(self.db.now(),datetime.fromisoformat(progress)) if progress else self.db.now()
+        return {'start':end-duration,'end':end}
+
     def _expire(self,db,row):
         if row['review_state']=='OPEN' and self.db.now()>=datetime.fromisoformat(row['review_expires']):
             db.execute("UPDATE analysis_runs SET review_state='EXPIRED' WHERE run_id=?",(row['run_id'],))
@@ -294,9 +304,8 @@ class AnalysisStore:
                 successor=None
                 if body.kind=='request_context':
                     old_intake=AnalysisIntake.model_validate_json(row['intake']);duration=old_intake.window.end-old_intake.window.start
-                    now=self.db.now()
                     intake=AnalysisIntake(cluster_id=row['cluster_id'],namespace=row['namespace'],role_name=row['role_name'],
-                        window={'start':now-duration,'end':now},idempotency_key='context-'+uuid4().hex,
+                        window=self.fresh_window(row['cluster_id'],row['namespace'],duration,connection=db),idempotency_key='context-'+uuid4().hex,
                         trigger='manual',supersedes_run_id=run_id,context_note=body.note)
                     successor=self._insert(db,intake,principal.actor)
                 value={'decision_id':'report-decision-'+uuid4().hex,'run_id':run_id,'revision':row['revision'],

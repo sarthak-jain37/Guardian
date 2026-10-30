@@ -46,7 +46,7 @@ kind: Role
 metadata: {name: {{ .Release.Name }}-inventory, namespace: {{ .Values.targetNamespace }}}
 rules:
   - apiGroups: [""]
-    resources: [replicationcontrollers]
+    resources: [replicationcontrollers, services]
     verbs: [get, list]
   - apiGroups: [apps]
     resources: [deployments, replicasets, statefulsets, daemonsets]

@@ -275,7 +275,7 @@ def review_panel(identity):
     path='/telemetry/pods/'+quote(ns,safe='')+'/'+quote(pod,safe='')
     st.subheader('Continuous severity assessment')
     continuous_assessment(identity.get('uid'))
-    st.caption('Automatic analysis runs without clicking Analyze. The optional controls below request an extra review.')
+    st.caption('Continuous review status is shown above. Analyze requests an additional advisory pod review; Role changes use Analysis and review.')
     st.subheader('Optional additional review')
     st.write('Ask about this pod’s behavior. The review combines its permissions, distinct observed actions, configured boundaries and collection gaps.')
     question=st.text_area('What do you want to understand?',value='Assess whether this pod needs investigation. Explain what the evidence proves and what remains uncertain.',height=90,key='question_'+ns+'/'+pod)
@@ -446,7 +446,8 @@ def llm_page():
 
 def approval_queue_page():
     st.title('HITL Approval Queue')
-    st.write('Review detected RBAC drift and newly proposed policies. Every change requires human sign-off; the AI explains and advises.')
+    st.info('Actual Role approvals and execution outcomes are in Analysis and review. This page shows legacy drift history; it cannot apply or revert Role changes.')
+    st.link_button('Open governed approvals','/analysis')
 
     top_col, scan_col = st.columns([3, 1])
     with scan_col:
