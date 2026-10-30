@@ -212,6 +212,10 @@ class CoverageHistoryTests(unittest.TestCase):
             report=self.query(window=Window(start=START-timedelta(days=7),end=self.now))
         self.assertLessEqual(validate_source.call_count,2)
         for series in report.series:
+            self.assertLess(len(series.coverage),100)
+            references={ref for interval in series.coverage for ref in interval.health_evidence_refs}
+            with self.db._connect() as db:
+                self.assertEqual(references,{r[0] for r in db.execute('SELECT coverage_id FROM evidence_coverage')})
             self.assertEqual(series.coverage[0].status,'unavailable')
             self.assertTrue(any(c.status=='complete_for_declared_scope' for c in series.coverage))
             inside=[c for c in series.coverage if c.interval.start<gap_end and c.interval.end>gap_start]

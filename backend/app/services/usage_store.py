@@ -270,10 +270,19 @@ class UsageStore:
             complete=bool(good) and not lost and not identity_uncertain
             reasons=[] if complete else (['source_gap'] if lost else ['identity_unresolved'] if identity_uncertain else ['coverage_unavailable'])
             chosen=good if complete else applicable
-            result.append({'interval':{'start':left,'end':right},'status':'complete_for_declared_scope' if complete else 'unavailable',
+            item={'interval':{'start':left,'end':right},'status':'complete_for_declared_scope' if complete else 'unavailable',
                 'reason_codes':reasons,'source_ids':sorted({r[0]['source_id'] for r in chosen})[:32],
                 'audit_policy_refs':sorted({r[2] for r in chosen})[:32],
-                'health_evidence_refs':[r[0]['coverage_id'] for r in chosen][:32],'known_lost_events':0 if complete else None})
+                'health_evidence_refs':[r[0]['coverage_id'] for r in chosen][:32],'known_lost_events':0 if complete else None}
+            # Preserve every selected health reference while packing adjacent
+            # equal-status intervals. Faster polling must not exhaust the wire
+            # contract simply because a healthy collector has run longer.
+            previous=result[-1] if result else None
+            fields=('status','reason_codes','source_ids','audit_policy_refs','known_lost_events')
+            refs=list(dict.fromkeys((previous['health_evidence_refs'] if previous else [])+item['health_evidence_refs']))
+            if previous and all(previous[field]==item[field] for field in fields) and len(refs)<=32:
+                previous['interval']['end']=right;previous['health_evidence_refs']=refs
+            else:result.append(item)
         return result
 
     def query(self,query,*,persist=True):
