@@ -8,7 +8,7 @@ marked live. Unknown/unrun outcomes are not reported as successes.
 
 | ID | Capability / condition | Setup and expected control | Actual evidence / status |
 | --- | --- | --- | --- |
-| AC-01 | Initial excess Secret read grant | Install separate over-permissioned reader. Collect actual reads, analyze and show exact narrowing. Human approval required. | Real local collection, Qwen3.5 and app checks exercised; final proposal/approval status in release verification JSON. Human completion remains separate. |
+| AC-01 | Initial excess Secret read grant | Install separate over-permissioned reader. Collect actual reads, analyze and show exact narrowing. Human approval required. | Real local governed narrowing completed on 30 October: Secret read denied, Pod read retained, verification passed and baseline activated. Dated identifiers/results are in project-report.md. |
 | AC-02 | Later risky grant addition | After verified initial baseline, run `guardian_pilot scenario drift --confirm-disposable`; analyze again. | Setup/reset implemented; later-drift execution passes recording integration test. Live second approval remains human work. |
 | AC-03 | Necessary Pod read | Actual reader uses its ServiceAccount for its own Pod. | Live audit shows authorized reads; tests protect observed permissions. No Pod permission removal requested. |
 | AC-04 | Rare scheduled access | Frozen natural workflow documentation and structured unexercised-operation families. | Development comparison reports actual retain/defer/removal outcomes; labels provisional, no claim of months of live collection. |

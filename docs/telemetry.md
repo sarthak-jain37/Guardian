@@ -177,24 +177,22 @@ and POST /telemetry/pods/{namespace}/{pod}/review. The POST body contains
 question and event_limit. Distinct evidence channels are sampled, shared service
 account events stay separate, and context overflow returns a 413 response.
 Model answers are advisory; missing evidence citations and output truncation
-are surfaced. The model uses its GGUF chat template and serialized inference.
-LLM_CONTEXT_SIZE, LLM_MAX_TOKENS and LLM_THREADS configure local resource use.
-
-Minikube testing uses a dedicated guardian-e2e Docker profile and audit mount.
-The API server must mount its audit file directory onto the node for export.
-The Kubernetes client explicitly honors KUBECONFIG set through dotenv. The
-frontend requires Streamlit 1.63 or newer. llama-cpp-python is now declared as
-an application dependency; CPU wheels may be installed from the upstream
-project's wheel index when a local source build is unsuitable.
+are surfaced. The shared lazy provider defaults to Ollama `qwen3.5:4b`, configured
+through `GUARDIAN_MODEL_PROFILE`. llama.cpp is an optional extra rather than a
+mandatory application dependency. See [models.md](models.md) for profiles and
+inference resource bounds. The client honors an explicitly configured kubeconfig;
+export/audit access and namespace permissions still require operator setup.
 
 ### Continuous severity assessments and dashboard alerts
 
-The backend reviews each current pod serially, checks again 60 seconds after each
-cycle, and skips successful reviews whose sampled evidence, permissions, pod UID,
-boundaries and collector states are unchanged. A slow CPU model can make a full
-cycle take longer than 60 seconds. `POD_REVIEW_ENABLED`, `POD_REVIEW_INTERVAL`,
-`POD_REVIEW_EVENT_LIMIT`, `POD_ALERT_THRESHOLD` and `LLM_GRADE_MAX_TOKENS` configure it.
-Manual reviews use the same model lock and grading path.
+When enabled, the backend reviews pods serially. A matching successful review can
+be reused within `POD_REVIEW_INTERVAL`; due reviews can run again even with
+unchanged evidence. The code default is 120 seconds; `.env.example` illustrates
+60 seconds. Slow inference/queues can exceed either interval. Configure
+`POD_REVIEW_ENABLED`, `POD_REVIEW_INTERVAL`, `POD_REVIEW_EVENT_LIMIT`,
+`POD_ALERT_THRESHOLD` and `LLM_GRADE_MAX_TOKENS` deliberately. Manual reviews use
+the same grading path. Set `POD_REVIEW_ENABLED=false` to reserve laptop inference
+for the dedicated LangGraph worker during a demo.
 
 Grades are advisory model assessments from 0–10: 0–2 low concern in the sample,
 3–4 needs checking, 5–6 concerning, 7–8 dangerous, 9–10 critical. Missing evidence
@@ -223,52 +221,41 @@ the human to see notifications; background reviews continue while it is closed.
 Neither the model nor the alert service modifies RBAC or deletes pods.
 
 
-### Continuous local monitoring
+### Optional development service supervision
 
-The `guardian-monitor.service` user service runs `scripts/dev_services.py`, which
-supervises the API, dashboard, audit export, Hubble relay forwarding/export, and
-Tetragon export. Failed child processes retry with bounded backoff. Backend
-collectors and the pod grading worker run independently of browser requests.
-Inventory polls every 10 seconds; each pod is due for model review every 120 seconds, including unchanged evidence.
-Inference is serial; queued and overdue counts disclose CPU capacity limits.
-Model input combines aggregate counts across retained history with concrete examples
-and the previous assessment. Retention bounds apply; this is not lifetime history.
-Alerts publish immediately after a valid assessment reaches the configured threshold
-(default 7/10). Model errors never clear an existing alert.
-The dashboard refreshes automatically every 10 seconds while open.
+`scripts/dev_services.py` can supervise the API, dashboard, audit export, Hubble
+forwarding/export and Tetragon export for an explicitly configured development
+cluster. Failed children retry with bounded backoff. It defaults inventory to ten
+seconds and per-pod review to 120 seconds. The dashboard refreshes while open;
+backend collection/review loops do not depend on an open browser.
 
-Service template: `scripts/guardian-monitor.service`. On this machine it is
-installed in the user's systemd directory, enabled, and user lingering is enabled.
-Use `systemctl --user status guardian-monitor` to inspect it,
-`systemctl --user restart guardian-monitor` to restart, and
-`systemctl --user stop guardian-monitor` to stop all supervised children.
-Logs are in `output/testing/continuous` under the chat workspace.
-The machine, Docker, Redis and Kubernetes must be available; sleep/power loss
-interrupts collection. Model failures remain errors, not successful assessments.
+`scripts/guardian-monitor.service` is a developer-specific systemd template, not
+a portable installed service. Replace its absolute paths, kubeconfig, context,
+profile and log directory before installing a reviewed copy. Do not assume it is
+installed, enabled or appropriate on another laptop. The packaged Kind/Helm pilot
+uses the separate [demo runbook](demo-runbook.md).
 
+Aggregate history and concrete samples remain bounded by retention. Sleep,
+exporter disconnects or source rotation can interrupt collection. Errors remain
+visible and never become successful assessments or complete-source claims.
 
-### Critical alerts and permission decisions
+### Critical alerts and legacy permission suggestions
 
-Only confirmed scores of 9–10 appear as red critical alerts. Both model passes
-must cite corroborating observations from different collectors; root status,
-ordinary token reads, permissions, and denied requests alone cannot qualify.
-Critical reviews automatically queue a model-generated permission proposal.
-The model selects removal IDs from existing rules; it cannot create grants or
-execute commands. Proposed manifests are built and validated by the server.
+Critical scores of 9–10 require a confirming model pass and concrete corroborating
+cited observations from different channels. Root status, routine token reads and
+permission exposure alone are insufficient. These are advisory assessments, not
+proof of compromise or permission to mutate the cluster.
 
-The Alerts page shows the exact before/after Role and RoleBinding objects and
-all pods sharing the service account. Only Roles exclusively bound to that
-service account in the pod's namespace can be reduced. Shared/cluster-wide
-roles require manually scoped remediation. Other grants may still authorize
-the same actions. RoleBinding subjects and role references are preserved;
-an annotation records the accepted proposal.
+Confirmed critical reviews can generate advisory removal suggestions from
+existing rule IDs. Legacy Redis proposals/history remain readable, but their
+mutation endpoint returns `410 legacy_execution_retired`. Old Accept/Reject
+workflows, actor-name fields or legacy ACTIVE records do not grant authority.
+The legacy approval queue is read only.
 
-Accept and Reject are explicit client decisions. Acceptance rechecks the
-critical assessment, pod UID, service account, affected pods, RBAC snapshot,
-and resource versions before writing. Changed proposals are blocked. Partial
-execution is recorded rather than reported as success. Repeated decisions do
-not repeat writes. Redis stores proposal manifests and an append-only decision
-stream without expiry, including actor name supplied by the local operator,
-notes, timestamps and execution receipts. This local application does not
-provide authenticated operator identity; do not expose its write API publicly.
-After a restart, interrupted applications are marked unknown for reconciliation.
+For a real Role change, use [Analysis and review](analysis.md), then the separate
+[governed action workflow](execution.md): independent preparation, scoped human
+approval, conditional rules-only patch and verified outcome. Scores and advisory
+suggestions cannot bypass that workflow. RoleBindings remain unchanged in the
+supported actuator. Governance/analysis/execution routes have scoped auth; older
+monitoring endpoints still need a trusted local/private boundary or external
+TLS/authentication gateway.

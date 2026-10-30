@@ -27,7 +27,8 @@ provider, schema, byte, deadline and domain validation still apply. Errors and
 truncation become explicit failed/blocked analysis rather than partial success.
 Provider startup and requests run in a killable process under one deadline.
 Requested revision and resolved revision remain distinct; a mutable model tag is
-not reported as a verified digest. Pin deployment weights/digests in Phase 5.
+not reported as a verified digest. Pin deployment weights/digests in private
+deployment configuration.
 The provider enum addition is backward compatible for existing saved profiles;
 older consumers must negotiate Ollama support before accepting new profiles.
 

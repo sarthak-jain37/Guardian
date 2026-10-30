@@ -1,263 +1,106 @@
-# Guardian LangGraph module demo
+# Guardian LangGraph orchestration
 
-Current phase 1–5 commands and expected results are in [VERIFY.md](VERIFY.md).
-Backend/worker/deployment integration inputs are in [HANDOFF.md](HANDOFF.md).
-The remaining LangGraph-side implementation includes governed backend consumer
-adapters, receipt reconciliation, supplemental pod-context validation and a
-development evaluator/demo. Real backend/executor and lab acceptance remain
-external gates; the existing dashboard still uses the legacy summary path.
+This module supplies the bounded evidence-to-report graph used by the integrated
+Guardian analysis worker. It includes deterministic facts/policy checks,
+investigator/planner stages, scoped read-only evidence tools, structured model
+adapters, durable budgets/checkpoints and revision/receipt-consumer contracts.
 
-```bash
-uv sync --locked --inexact --extra verification
-uv run --no-sync python -m agents.guardian.demo --directory personal_docs/fresh-full-demo
-```
+The merged backend now supplies real evidence/jobs, scoped authentication,
+governed action preparation and conditional execution. Start with the
+[project overview](../../README.md), [analysis guide](../../docs/analysis.md) or
+[complete demo runbook](../../docs/demo-runbook.md). This module's development
+CLI and recording demo are separate from the deployed execution workflow.
 
-Use a fresh output directory. The demo runs tests, schema checks and local
-recording scenarios; it performs no cluster writes. One real local Qwen v4-prompt
-development case also produced a validated useful two-stage proposal in about
-177 seconds; that is synthetic pilot evidence, not a held-out or lab result.
+## Deployed service boundary
 
-## Plan v4 phases 1–3
+`service_worker.py` claims jobs through scoped HTTP APIs, uses a server-pinned
+model configuration and backend-owned budgets, saves per-run checkpoints and
+publishes immutable reports under a live lease. It has no Kubernetes actuator.
+The configured default model is Ollama `qwen3.5:4b`.
 
-Phase 2 adds explicit snapshot adoption using `start --intent adopt_baseline`.
-It skips the model and can reach review without usage telemetry or a removal
-candidate. `decide adopt_baseline` authorizes only that exact adoption. The
-recording baseline adapter records a local test request with
-`baseline_activated=false`; it performs no Kubernetes write. Captured exports
-remain previews. Requests use v5; reports and graph/state use v7;
-proposal/test-decision schemas are v2. See contract decision 0002.
+The backend independently prepares exact actions from source reports, obtains a
+scoped human decision and executes/verifies the conditional patch. A saved preview
+can remain `BLOCKED/readiness_incomplete` because the inference worker deliberately
+has no real execution-verification port. Its proposed candidate may still be
+useful for separate backend preparation. See [execution.md](../../docs/execution.md).
 
-Phase 1 supplies strict contracts and checkpoint compatibility. Phase 2 supplies
-adoption routing, durable context revision requests, expired-review renewal and
-report/readiness publication. Phase 3 adds versioned prompts/profiles, typed model
-results, six scoped evidence tools and a standalone worker. Backend governance
-consumer adapters are implemented; actual backend wiring and lab acceptance remain pending. The personal phase plan stays
-in Git-ignored `personal_docs/langgraph-part2-phases.md`.
+## Graph and constraints
 
-Requests use `guardian.analysis-request.v5` and bind the optional baseline and
-policy version as well as snapshot/cluster/target UID. Reports use
-`guardian.report.v7` with typed permission facts, readiness and runtime versions.
-The three lifecycle vocabularies are separate; defining their values does not
-implement backend lifecycle persistence. The graph independently validates exports
-from every evidence adapter before analysis.
+The ordinary path loads evidence, builds deterministic permission facts and risk,
+runs an investigator, optionally obtains bounded context, selects a strategy,
+runs a planner and deterministically renders/validates exact rules. Unknown or
+protected grants cannot become eligible through model text. The model emits known
+IDs, not executable YAML or commands.
 
-`schema` exports all twenty boundary/model/worker schemas from the runtime definitions.
-See `contracts/compatibility.json` and
-`contracts/decisions/0003-model-tools-worker.md` for producer/consumer review
-status and wire versions. Shared component acceptance is pending. Production
-decision/verification/recovery/receipt acceptance still requires the real backend/executor;
-the exported test-decision contract remains simulation-only.
+The reusable graph also supports adoption, side-effect-free review interrupts,
+validated governed-decision consumers and receipt reconciliation. The production
+preview worker does not wire those routes as a direct executor. Baseline
+activation and recovery authority remain backend-owned.
 
-Checkpoints require compatible graph/state/validator/canonicalization/policy
-versions. Incompatible earlier reviews can be inspected with `status`, which reports
-`compatible=false`; `decide` and `resume` refuse them. Preserve old directories,
-reconcile any already-requested real backend action, and use a fresh reviewed
-revision. There is no automatic checkpoint migration or authority renewal.
+Defaults bound model calls to six, tool lookups to two rounds/four calls and
+repairs to one per stage. Calls are durably reserved before dispatch; crashes do
+not reset budgets. Checkpoints require compatible graph/state/validator/policy
+versions and the same model configuration fingerprint. Do not edit stamps to
+resume an incompatible review.
 
-The module demonstrates useful initial analysis without an approved baseline,
-separate investigator/planner stages, deterministic rendering and restartable
-review. Collector storage, backend authentication, the production ledger,
-Kubernetes execution, real baseline activation, recovery and deployment remain
-integration work owned by their respective components.
+## Install and verify
 
-All built-in evidence is **synthetic fixture data**. Scripted model responses are explicitly labeled `scripted-test`. The optional llama.cpp adapter runs real inference over the same fixture, without hidden required/unnecessary labels. Every review/decision/execution record is a **local simulation**. The recording executor performs no cluster writes and cannot activate a baseline. Captured evidence accepts preview mode only; missing backend verification prevents execution review.
-
-## Setup
-
-From the repository root, install the locked module dependencies:
+From the repository root:
 
 ```bash
-uv sync --inexact
+uv sync --locked --extra verification
+.venv/bin/python -m unittest discover -s tests/orchestrator -v
+GUARDIAN_RUN=$(mktemp -d)
+.venv/bin/python -m agents.guardian.demo --directory "$GUARDIAN_RUN" --skip-tests
 ```
 
-CPU tests need no model or GPU:
+The demo uses synthetic evidence, scripted responses and recording boundaries.
+It performs no cluster writes and cannot activate a real approved baseline.
+`EXECUTION_REQUESTED` in that demo is not verified live remediation. Use a fresh
+output directory to preserve earlier evidence/results.
+
+For a real-model development case, with Ollama running and the model downloaded:
 
 ```bash
-uv run --no-sync python -m unittest discover -s tests/orchestrator -v
+REAL_RUN=$(mktemp -d)
+.venv/bin/python -m agents.guardian.evaluate --directory "$REAL_RUN" \
+  --scenario complete --profile agents/guardian/config/dev-laptop.toml
 ```
 
-The shared backend installs llama.cpp >=0.3.36. For local inference, use the
-`local-model` extra to pin 0.3.36 and configure a GGUF file:
+This uses real inference over synthetic development evidence, not a live cluster
+or held-out benchmark. A nonzero result can represent an honest invalid/blocked
+or unhelpful model result. Do not replace it with scripted success.
+
+[Models](../../docs/models.md) documents the default and optional llama.cpp/vLLM
+profiles. The `local-model` extra installs llama.cpp only when deliberately
+selected. There is no hard-coded personal GGUF path in the supported workflow.
+
+## Developer interfaces
 
 ```bash
-uv sync --inexact --extra local-model
-export MODEL_PATH=/absolute/path/to/model.gguf
+.venv/bin/python -m agents.guardian.runner --help
+.venv/bin/python -m agents.guardian.runner schema
+.venv/bin/python -m agents.guardian.service_worker --help
 ```
 
-The adapter initializes lazily in a separate process with a per-request deadline. It uses CPU inference, recorded decoding settings, a bounded context, and schema-constrained JSON followed by independent Pydantic/reference/eligibility validation. Runtime string bounds are omitted from the llama.cpp grammar to avoid its grammar-expansion limit; they remain enforced by the independent validator. The grammar requires one assessment per supplied permission ID without choosing its action. Runtime failure never becomes a scripted success.
+The file runner's `start/status/decide/resume/renew/next` commands exercise local
+simulation and compatible revisions. Its test decisions cannot authorise real
+captured evidence or enable production execution. Actual action decisions use
+the dashboard or `scripts.guardian_review` against the governed backend.
 
-## Model profiles and stage records
+`contracts.py`, `schemas.py` and `contracts/compatibility.json` define the strict
+wire contracts. `ports.py` describes interfaces; `adapters/backend.py` supplies
+the service HTTP implementation. Supplemental pod evidence validates scope,
+identity and time; network/runtime context never substitutes for API usage
+coverage. [HANDOFF.md](HANDOFF.md) records current component responsibilities and
+[VERIFY.md](VERIFY.md) has focused commands.
 
-`config/test.toml`, `config/dev-laptop.toml` and `config/lab.toml` are strict worker
-profiles. Replace the local file or approved vLLM endpoint/model/revision before
-using a real profile. The lab file is a configuration example, not a selected
-model or an implemented university service. The first worker supports one job at
-a time with a finite input queue; larger concurrency requires a measured profile
-and backend coordination.
+## Evaluation and limits
 
-```bash
-uv run --no-sync python -m agents.guardian.runner --directory personal_docs/profile-demo start --profile agents/guardian/config/test.toml
-```
-
-Prompts and model-output schema versions are part of checkpoint compatibility.
-Each stage records its configuration fingerprint, exact bounded sanitized input
-messages/schema, response or stable error, requested and observed model identity,
-available token counts and duration. Unknown resolved revisions remain null.
-Provider exception strings and service credentials are not copied into reports.
-Oversized inputs are marked omitted with hash/byte count and are not sent to the
-model; oversized or truncated outputs fail explicitly. Configured context size
-does not verify a remote server's actual context capacity, and no prompt is
-silently truncated. llama.cpp startup and inference share one request deadline.
-
-The optional vLLM adapter uses JSON Schema at the configured service. Credentials
-are read only from the named worker environment variable; endpoint redirects and
-embedded credentials/query strings are rejected. Neither real adapter initializes
-a model at import. Missing local files or unavailable services become explicit
-model-stage failures, preserving deterministic findings.
-
-The six tools are `get_case_snapshot`, `get_workload_context`, `get_usage_summary`,
-`get_binding_consumers`, `get_failure_history` and `check_access`. Their arguments
-come from known case/subject/target/permission/query IDs. They expose no shell,
-filesystem, arbitrary URL, Secret-body or mutation interface. SAR results cannot
-manufacture workload request counts. Scoped prior failures protect their exact
-candidate/workload context. Missing backend history is unknown; the fixture's
-verification adapter explicitly labels its history check simulated.
-
-Model invocation/repair and lookup round/call reservations commit before work.
-Only one repair per stage is allowed across all follow-ups and restarts. Cached
-tool results survive checkpoint replay; a dispatched lookup with a lost outcome
-finishes blocked instead of repeating blindly. Unresolved lookup requests at the
-two-round/four-call limit finish with findings and `lookup_budget_exhausted`.
-The maximum supported route still fits the recursion limit of 32.
-
-## Standalone worker handoff
-
-`worker.py` consumes strict `WorkItem` deliveries independently of FastAPI and audit
-ingestion. Analysis carries an AnalysisRequest; resume carries only a stored
-decision ID; revision carries only a stored RevisionRequest ID. Delivery itself
-does not supply authority. Duplicate deliveries recover existing checkpoints.
-Human waiting acknowledges the current job and closes its model session; the
-backend later delivers a separate decision job.
-
-```bash
-uv run --no-sync python -m agents.guardian.worker --directory personal_docs/worker-demo --item /absolute/path/work-item.json --profile agents/guardian/config/test.toml
-```
-
-For the file test handoff, the directory contains its sanitized `evidence.json`.
-Generate the WorkItem schema with `runner schema`; the request must match that
-evidence. The CLI uses a bounded recording queue and an exclusive local-directory
-lock. `WorkQueuePort` defines receive/acknowledge/fail for a real integration. The
-backend owner supplies durable queue/outbox delivery, leases, scope authorization
-and retry scheduling; the in-memory adapter is not a production queue. Separate
-worker processes do not establish a cross-service transaction or target lease.
-
-## Demo commands
-
-Choose a new directory for each case so prior evidence and results are preserved. Default output is under the existing Git-ignored `personal_docs/` folder. Check ignore rules if you choose another path; checkpoints and actual evidence exports are local artifacts.
-
-```bash
-uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo-initial start
-uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo-initial status
-```
-
-These are separate processes. The second command retrieves the same pending review without another model call. Inspect `result.json`, `role-preview.yaml`, and `binding-preview.json`. The patch changes only Role rules, with UID/resourceVersion tests; the binding preview is unchanged.
-
-Record a local test rejection, then copy the returned decision ID into resume:
-
-```bash
-uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo-initial decide reject
-uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo-initial resume --decision-id RETURNED_ID
-```
-
-On a separate case, use `decide approve_remediation` and resume its returned ID to demonstrate **one recording-fake request**. The receipt explicitly says `cluster_write_performed=false`, `verification_performed=false`, and `baseline_activated=false`. Duplicate delivery cannot create another recorded action. A resume boolean or forged decision ID cannot authorize even this simulated request.
-
-To demonstrate adoption independently of removal, start a separate case:
-
-```bash
-uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo-adoption start --intent adopt_baseline --scenario missing-usage
-uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo-adoption decide adopt_baseline
-uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo-adoption resume --decision-id RETURNED_ID
-```
-
-This uses zero model calls and records a simulated adoption request, with no
-cluster write or real baseline activation. The adoption proposal has no patch.
-
-On a pending review, `decide request_context` followed by `resume` records one
-successor revision and supersedes the old proposal. `next` starts that recorded
-run using fresh scoped context and fresh model analysis. The backend owner decides
-when an answer is ready and supplies the real queue/outbox; the demo command is
-explicit. Context can arrive after the intent is recorded. The loaded snapshot
-is bound before analysis and the old decision cannot approve the new proposal.
-
-```bash
-uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo-initial decide request_context
-uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo-initial resume --decision-id RETURNED_ID
-uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo-initial next
-```
-
-After an unused review or approval expires, `renew` records a new revision and
-closes the old worker checkpoint; `next` starts its review. It refuses still-valid
-authority, rejected/revoked decisions and actions already started. A harmless
-freshness/retained-use refresh can reuse validated analysis with zero model calls;
-new candidate use, changed context, lost citations, coverage changes or count
-corrections require reanalysis. Gates and verification run again either way and
-each revision needs a new decision. Expiry does not refresh frozen fixture history:
-stale sources remain blocked. Production expiry scheduling remains backend-owned.
-
-Follow-up analysis reconstructs the original configured provider. Missing real
-model configuration is an explicit error and never becomes scripted inference.
-`result.json` and preview files show the current run; `runs/<run-id-hash>/` preserves
-each run's evidence and result. The SQLite store preserves immutable published
-reports, decisions, revisions and append-only proposal transitions separately
-from the current status projection.
-
-Demonstrate blocked evidence:
-
-```bash
-uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo-gap start --scenario coverage-gap
-uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo-monthly start --scenario monthly
-uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo-missing start --scenario missing-usage
-```
-
-Run actual inference instead of scripted responses:
-
-```bash
-uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo-model start --model llama-cpp --threads 4 --timeout 180
-```
-
-The default schema uses separate investigator/planner outputs. Reports retain model outputs, validation failures, producer, stage latency, token usage where available, and model/prompt metadata. A useful run should contain a nonempty proposal; a valid but unhelpful all-retain output is reported honestly. Built-in frozen fixtures explicitly configure a 600-second source-lag allowance for slow CPU smoke tests; the shared policy default is 60 seconds. Neither value proves production safety.
-
-## Team integration boundary
-
-Generate the schemas for a teammate's export:
-
-```bash
-uv run --no-sync python -m agents.guardian.runner schema
-```
-
-`contracts/usage_summary_v1.py` is the shared collector boundary, including exact clipped UTC hourly buckets, coverage partitioning, effective identity, outcome distinctions, carried authorizations, bounds and unknown values. It validates an export; it does not aggregate or deduplicate audit logs. The collector owner supplies the actual summary and its source/health references.
-
-`EvidenceBundle` requires a target identity/version envelope, subject, optional binding/context/usage, nullable approved baseline, policy and source references. For the pilot, include separate keys for `get pods`, `list pods` and `get secrets`, using `any_name` projections for unrestricted get grants. The supported input is bounded to 128 permission combinations. Unsupported wildcards, name restrictions, shared/unknown consumers, alternate grants and missing candidate evidence block narrowing.
-
-Load an actual sanitized export labeled `source_mode="captured"`:
-
-```bash
-uv run --no-sync python -m agents.guardian.runner --directory personal_docs/demo-capture start --evidence /absolute/path/to/evidence.json --model llama-cpp
-```
-
-Captured evidence produces a draft/blocked preview unless the later real governance/verification integration exists. It cannot acquire authority from the local test decision store. The external component interfaces are in `ports.py`; current adapters are confined to this module. The existing ingestion processor, API, dashboard, audit policy and Kubernetes service are unchanged.
-
-## Implemented checks and limits
-
-- No baseline or permission answer sheet is required for the fixture's useful initial proposal.
-- Observed authorization use, including authorized errors and carried requests, protects a capability. Unknown/denied attempts, missing coverage, stale sources and relevant unexercised cycles prevent its removal.
-- Risk severity comes from the existing pure scanner; the model cannot erase its findings. Severity is separate from evidence completeness and change risk.
-- Rendering preserves original rule associations and their cross-product semantics. Exact selected removals form a subset; no model YAML is executed.
-- The review interrupt contains no side effects. SQLite checkpoints and separate local test records survive process restart.
-- Decisions bind revision, hashes, target, policy, kind and independent review/execution deadlines. Current evidence/readiness is checked again before recording a request.
-- Durable model-call reservations are committed before inference, so a crashed call consumes the budget. Lookup rounds/calls and one repair per stage are bounded; the longest supported route fits the recursion backstop.
-- Approved execution still requires an exact snapshot hash. Renewal may reuse analysis after a narrowly checked non-material refresh, with fresh review and approval.
-- `request_context` closes the old run as stale and records a fresh revision. `renew` and `next` exercise the port contract locally; real scheduling and expiry delivery remain backend work.
-- Simulated approval ends at `EXECUTION_REQUESTED`, never a claimed verified `COMPLETED` deployment. No recovery authority is granted.
-
-See the personal scope document for the meeting sequence and teammate messages. It intentionally remains in Git-ignored personal documentation.
+The development evaluator and `eval/guardian` frozen comparison keep expected
+labels outside model inputs/runtime images. The wider validator-v2 development
+run exposed unsafe accepted advice; the retained results and shared validator-v3
+correction are in [evaluation.md](../../docs/evaluation.md). Neither schema-valid
+output nor the local live pilot demonstrates LLM superiority or universal safety.
+Independent lab reproduction, reviewed held-out evaluation and live recovery
+remain separate acceptance gates; see [project-report.md](../../docs/project-report.md).

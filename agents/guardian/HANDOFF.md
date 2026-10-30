@@ -1,125 +1,77 @@
-# Orchestration integration handoff
+# Orchestration integration boundaries
 
-The orchestration implementation includes governed review/receipt consumers,
-bounded model/tools/worker behavior, producer context validation and development
-evaluation. Real backend/collector/executor acceptance and university deployment
-remain external integration gates. See `VERIFY.md` for commands and exact claims.
+The module is integrated with the merged FastAPI backend and Streamlit/terminal
+review workflows. This document describes current responsibilities, not an
+unimplemented team handoff. [VERIFY.md](VERIFY.md) covers component checks;
+[the demo runbook](../../docs/demo-runbook.md) covers the actual pilot.
 
-The integrated preview producer/consumer, worker, review UI and laptop run
-instructions are now in [the analysis guide](../../docs/analysis.md). The execution
-driver requirements below remain Phase 4 work; preview integration cannot supply
-positive authority or verified receipts.
+## Who owns what
 
-## Current supported scope
-
-One dedicated namespaced Role with a known ServiceAccount/application and complete
-consumer inventory; supported finite resource/verb/group combinations; exact
-conditional `/rules` replacement; unchanged binding preview. Initial hardening
-accepts a null approved baseline and no permission answer document. Unsupported
-restrictions, unresolved consumers/alternate grants, incomplete usage, rare
-unexercised operations and unavailable meaningful verification block narrowing.
-
-Main's pod inventory/audit/Hubble/Tetragon exports are supplemental context.
-`adapters.pod_context.attach_pod_context` consumes the actual pod-evidence response
-shape, validates selected UID/SA/time/scope, projects bounded allowlisted metadata
-and keeps shared-identity attribution explicit. It does not replace UsageSummary,
-advance collection freshness, invent complete coverage or manufacture dependencies.
-The configured client establishes the cluster association; the current pod-export
-body does not itself carry a trusted cluster envelope. A JSON file is untrusted
-context, not proof of collection authenticity.
-
-## Backend integration
-
-Use `BackendReviewAdapter(driver)` and `BackendGovernanceAdapter(driver)` with
-backend-owned transport/session configuration. The proposed driver methods and
-required semantics are recorded in decision 0004. They are not implemented HTTP
-routes. Keep acceptance pending until owners agree and real adapter fixtures pass.
-
-Backend supplies:
-
-- EvidencePort returning strict immutable scoped evidence and current refreshes.
-- Authoritative reviewer authentication, scope authorization, immutable decisions,
-  exact preconditions, expiry/revocation and atomic durable resume delivery.
-- VerificationPort with `simulation_only=False`, actual dry-run/access/functional
-  checks and failure history. The executor repeats current checks before writing.
-- Durable BudgetPort, including model/repair/tool reservations and atomic
-  `begin_action(action_key)`: true for its first reservation, false afterward.
-- Durable action receipt lookup and idempotent outcome projection, including
-  notification intent. Backend owns baseline activation and independent recovery.
-- Durable queue/outbox, run/target coordination, scheduling and retry policy.
-
-The integration session factory constructs `Runtime(evidence=..., model=...,
-review=BackendReviewAdapter(driver), verification=..., execution=None,
-budget=..., governance=BackendGovernanceAdapter(driver))`, and builds the graph
-with a supported durable checkpointer. Pass that session factory and the backend
-WorkQueuePort to `run_worker`. The session factory closes model/connections on
-job completion or review waiting. It must save/export the selected run/profile
-through the application's storage implementation; the file CLI is a dev adapter.
-
-Deliver `WorkItem(kind="analyze", request=...)` using request mode `governed` only
-when those real ports are configured. Resume deliveries contain just the stored
-decision ID. Receipt deliveries use `kind="reconcile"` with only the stored run
-ID. Each reconciliation reads one receipt; external scheduling decides when to
-deliver another. No model call, recovery plan or write is performed by that route.
-
-The module's local CLI intentionally cannot enable governed mode or create a
-production decision. Captured files stay previews. `record_test_decision` cannot
-authorize a non-simulated proposal. A model/service account cannot approve its
-own proposal through these consumers.
-
-## Execution and recovery contract
-
-Preflight must pass all named checks, bind the exact IDs/hashes/UID/version and
-remain within the decision's execution deadline. An approval accepted before
-review expiry retains its independent execution window. Uncertain dispatch is
-reconciled from a stored receipt, never blindly resubmitted. Backend still owns
-intent-before-write, idempotency, leases and the API-server conditional operation.
-
-COMPLETED requires actual verification references and baseline activation.
-ROLLED_BACK requires a verified restoration receipt, explicit backend recovery
-authority ID, exact original rules hash, forward/restored versions and notification
-intent. The graph does not grant recovery consent or execute restoration. Backend
-must verify exact per-action consent, trigger, expiry, incident/pause and unchanged
-post-apply state. Terminal manual outcomes need a separate operator reconciliation
-process; the worker refuses a silent rewrite into success.
-
-## Worker configuration and deployment inputs
-
-| Item | Input supplied by this module / requirement |
+| Component | Current responsibility |
 | --- | --- |
-| Runtime | Python >=3.11, locked dependencies; LangGraph/checkpointer in `uv.lock` |
-| Profiles | Strict `config/test.toml`, `dev-laptop.toml`, `lab.toml`; replace placeholder file/endpoint/model revision |
-| Providers | Lazy llama.cpp CPU or configured vLLM; JSON Schema plus independent validators |
-| Concurrency | One active job per worker; bounded recording queue 1–64; real delivery coordination external |
-| Defaults | Six model calls; one repair per stage across restart; two lookup rounds/four calls; recursion limit 32 |
-| Human waiting | Acknowledges job/releases model session; backend later delivers stored decision ID |
-| Persistence | Checkpoints, budgets and authoritative review/action history must survive restart; local SQLite is single-worker development |
-| Identity | Worker needs scoped evidence/read and backend request-by-ID access; no direct Role mutation, Secret-body or reviewer credentials |
-| Transport | Protected configured model/backend endpoint; credentials from named worker environment/secret configuration, never model inputs |
-| Health | File CLI exit status/WorkOutcome for dev; real queue/lease readiness belongs to deployment/backend entrypoint |
-| Resources | Laptop smoke: four CPU inference threads; no GPU in routine tests. Lab allocation, memory/latency/capacity must be measured |
-| Upgrade | Graph/state/report v7, request v5, worker v2, model config/result v2, prompt v4. Preserve incompatible runs; no automatic authority migration |
+| Audit collector / evidence services | Exact usage, coverage, provenance, current identity/consumer snapshots and archives |
+| Backend analysis store | Intake, immutable capture/report, scoped jobs, leases/fencing, budgets and fresh/context revisions |
+| `service_worker.py` | Preview graph, actual configured inference, durable checkpoints and leased publication through HTTP |
+| Deterministic graph policy | Known operation IDs, protection/eligibility, bounded tools and exact subset rendering |
+| Backend governance store | Authenticated immutable human decisions, deadlines/revocation, holds and durable outbox |
+| Backend execution store | Independent preparation, exact action authority, conditional dispatch, verification, baselines, recovery and receipts |
+| UI / review CLI | Display exact stored content and submit decisions to the same scoped backend |
 
-The model config records requested revision separately from observed identity.
-Unknown resolved revision remains null. Configured context size is not proof of
-server capacity. Evaluation records source/profile/input hashes, exact stage
-results, available tokens, durations and failures. A dirty source tree is labeled.
+The deployed inference Runtime uses `BackendEvidencePort`, `BackendBudgetPort`,
+`BackendReviewPort`, `PreviewVerificationPort` and no execution port. A model
+worker cannot approve its own report or directly patch a Role. It can release its
+model session after report publication; the backend executor does not require
+inference uptime to process stored authority.
 
-No Helm chart, backend service, workload manifest or teammate implementation was
-created by this orchestration handoff. Supply this table to the deployment owner
-for the real worker entrypoint/PVC/model endpoint and disabled-execution install.
+## Supported action and evidence
 
-## Outstanding acceptance evidence
+The current actuator changes only `/rules` on one existing dedicated namespaced
+Role with a known ServiceAccount/controlled workload and supported finite rules.
+Bindings remain unchanged. Shared/unknown consumers, alternate grants, unsupported
+restrictions, stale/missing usage and unresolved relevant workflows block narrowing.
+Initial hardening requires no old approved baseline or permission answer sheet.
 
-1. Owner-approved contracts and compatible real UsageSummary/inventory exports.
-2. Authenticated decisions, durable delivery, conditional apply/adoption and
-   actual verification/receipt/recovery adapter tests.
-3. Pinned real workload/image, meaningful functional checks and protected model
-   endpoint on confirmed lab allocation.
-4. Frozen development/held-out split and metric definitions, equivalent-input
-   deterministic/LLM comparison, actual run provenance and failures.
-5. Real initial hardening, later drift, blocked authority/coverage cases and
-   governed recovery on the team's disposable lab environment.
+Pod-context exports are supplemental. Their adapter validates selected UID,
+ServiceAccount, time and scope; it does not invent complete usage or collection
+health. JSON file contents are not proof of source authenticity. Runtime inputs
+never receive evaluator labels or expected removals.
 
-The local development evaluator and recording contract tests supply preparation
-and consumer evidence. They do not satisfy those integrated release gates.
+## Generic consumer contracts versus service wiring
+
+`BackendReviewAdapter` and `BackendGovernanceAdapter` support driver-based
+consumers for validated decisions, preflight and receipts. They are distinct from
+the current preview worker's concrete HTTP ports. Do not infer that every generic
+port is an HTTP endpoint with the same method name.
+
+Reusable `WorkItem` deliveries identify stored runs/decisions. Duplicate delivery
+must be idempotent. Receipt reconciliation reads backend evidence without new
+model calls, arbitrary writes or recovery planning. Incompatible checkpoint
+versions and uncertain outcomes require explicit reconciliation/fresh review;
+editing saved version fields does not restore authority.
+
+## Authority and outcome requirements
+
+A positive decision binds the exact stored revision/hash and current principal.
+Independent current evidence, real dry-run/access/application checks and execution
+conditions are repeated before dispatch. The backend persists intent before the
+conditional UID/resourceVersion patch. An unknown response is not blindly retried.
+
+Completion requires confirmed apply, required verification and baseline activation.
+Recovery requires separate exact consent, a qualifying failure, current conditions
+and verified restoration. A pending checkpoint, advisory severity score, test
+receipt or old Redis baseline cannot satisfy those conditions.
+
+## Deployment and acceptance
+
+The packaged deployment uses one active backend/collector/worker on one storage
+host with local persistent SQLite and OS locking. Inference/dashboard identities
+have no Kubernetes token or raw archive credentials. Model configuration and
+resolved deployment digest are pinned; the default laptop provider is Ollama.
+See [deployment.md](../../docs/deployment.md) for actual identities/storage and
+[execution.md](../../docs/execution.md) for the trusted harness contract.
+
+The local pilot completed real initial narrowing with verified retained Pod read,
+denied Secret read and baseline activation. Recording tests separately cover
+failure/recovery paths. Independent university reproduction, a controlled live
+recovery drill, external durable backup/key custody and reviewed held-out/human
+quality measurements remain outstanding; see [current results](../../docs/project-report.md).

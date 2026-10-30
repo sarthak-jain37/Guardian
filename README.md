@@ -207,10 +207,10 @@ the isolated RBAC pilot does not establish live eBPF coverage.
 The offline comparison includes a retained validator-v2 development safety
 failure and a conservative validator-v3 correction. No held-out pass, universal
 dependency proof or LLM advantage over the deterministic baseline is claimed.
-See [evaluation](docs/evaluation.md), the historical
+See [evaluation](docs/evaluation.md), the current
 [project report](docs/project-report.md) and [release measurements](docs/release/).
-Earlier phase/handoff documents describe their delivery-time boundaries; they
-should not be read as the latest integrated pilot status.
+Historical architecture decisions and frozen measurements retain their original
+scope; the project report distinguishes those records from later live results.
 
 Important boundaries:
 
@@ -229,7 +229,7 @@ Important boundaries:
 
 ## Further documentation
 
-- [Implementation phases](docs/implementation-phases.md)
+- [Documentation index](docs/README.md)
 - [Evidence, coverage and archives](docs/evidence.md)
 - [Network/runtime telemetry and pod workspaces](docs/telemetry.md)
 - [Authenticated governance](docs/governance.md)

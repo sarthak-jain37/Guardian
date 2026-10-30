@@ -1,8 +1,9 @@
-# Integrated analysis and report review (Phase 3)
+# Integrated analysis and report review
 
-Use the current `feat/guardian-project-completion` branch. The earlier five
-LangGraph module phases are separate from the six whole-project phases in
-`docs/implementation-phases.md`.
+Use the current merged source on `main`. This guide covers capture, inference and
+nonwriting report review. Actual Role changes use the separate backend-owned
+[governed action workflow](execution.md). Start with the [demo runbook](demo-runbook.md)
+for the packaged local pilot.
 
 ## What runs
 
@@ -27,11 +28,11 @@ Report review is deliberately outside the execution interrupt. A blocked report
 with no proposal is still reviewable. Review outcome is separate from the graph's
 analysis status: acknowledging a BLOCKED report records NO_CHANGE, preserving the
 original BLOCKED analysis. Neither this review nor a ready-looking model response
-creates action authority. Phase 4 adds separate backend preparation, action review
+creates action authority. The backend supplies separate preparation, action review
 and independently revalidated execution; see [execution.md](execution.md). Positive
 approval/adoption remains HTTP 503 for an unprepared action or disabled executor.
 
-This extends the same private governance database, scoped credentials, server
+This uses the same private governance database, scoped credentials, server
 clocks and immutable audit trail. Original `/governance/reviews` records remain
 separate proposal-oriented intake; blocked previews are stored with their analysis
 run, not promoted into an execution review. No test ledger or recording executor
@@ -105,7 +106,8 @@ docker run --rm --name guardian-redis -p 127.0.0.1:6379:6379 redis:7-alpine
 Run the independent collector with the actual operator-approved audit policy and
 source declaration as described in `docs/evidence.md`. Without it, reports must
 show unavailable coverage. Do not edit completeness/behavior fields to make a
-demo pass. No live workload behavior checks have been supplied by Phase 3.
+demo pass. The packaged pilot supplies a real workload/harness; direct-service
+analysis alone does not install it or enable execution.
 
 Open the dashboard's **Analysis and review** page, enter the human token from
 `data/guardian/reviewer.token`, select its authorized namespace, tick **Start an
@@ -114,7 +116,7 @@ available collector watermark (or shows missing coverage); a week means seven
 actual days. Historical report browsing does not require a live inventory request.
 Refresh reports, inspect evidence and record a nonwriting review. Request context
 to observe a new case revision with fresh evidence/model calls; the old report
-remains available. The source preview's approval is disabled; separately prepared
+remains available. Source reports have no Role-change approval; separately prepared
 governed actions appear below when configured. Use **Capture fresh evidence and
 analyse again** after expiry; old credentials/decisions cannot renew authority.
 
@@ -153,9 +155,10 @@ existing ID/eligibility validator while retaining abstention choices; independen
 schema/domain validation still runs. These are functional smoke checks, not the
 held-out benchmark or live-cluster acceptance.
 
-The initial durable deployment supports one host/local SQLite persistent disk,
-not multiple writers over a network filesystem. Worker mounts/OS identities,
-measured capacity/latency, pinned model digest, external encrypted copies and key
-backup/restore, clean Helm deployment and live end-to-end acceptance remain
-Phases 4–6. Report archive pins explicitly disclose external-copy verification as
-pending. No Kubernetes writes have been performed for this phase.
+The durable deployment supports one host/local SQLite persistent disk, not
+multiple active replicas over a network filesystem. The chart, scoped identities,
+pinned pilot model, real workload checks and backup/restore tools are implemented;
+local initial narrowing has completed and passed verification. See the
+[project report](project-report.md) for the dated results. Independent lab
+reproduction, external durable copy/key custody and held-out acceptance remain
+separate requirements. Archive pins disclose external-copy verification as pending.

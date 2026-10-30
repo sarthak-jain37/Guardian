@@ -1,4 +1,4 @@
-# Evidence and history (Phase 2)
+# Evidence and history
 
 The independent collector reads Kubernetes audit JSON lines; inference never runs
 in its collection loop. Start the backend and collector on the same host and
@@ -23,8 +23,8 @@ the collector with `--database`, `--source-policy`, `--audit-policy`, `--audit-l
 `--archive-directory` and `--archive-keys`. The backend uses the same database;
 set `GUARDIAN_ARCHIVE_DIRECTORY` and `GUARDIAN_ARCHIVE_KEYS` there for retrieval.
 Keep all historical key IDs when rotating. Backup both ciphertext and keys through
-separate protected operator procedures; external durable copy and measured
-backup/restore acceptance belong to Phase 5.
+separate protected operator procedures. The packaged local backup/restore drill
+does not establish external durable custody; see [deployment.md](deployment.md).
 
 Requests are deduplicated across stages and sources by cluster/auditID. Outcome
 corrections update the original request hour; old published summaries stay
@@ -62,6 +62,7 @@ envelope. Legacy hashes are incompatible with semantic v2, not new authority.
 Scoped authenticated endpoints: `POST /evidence/usage`, `GET /evidence/roles`,
 `GET /evidence/snapshots/{id}`, `POST /evidence/archive-query`. They expose normalized
 evidence, never archive paths, credentials or encryption keys. No endpoint lets a
-model or reviewer assert collection completeness. All current evidence tests are
-local fixtures; real collection capacity, external copy and live policy acceptance
-remain deployment checks.
+model or reviewer assert collection completeness. Automated evidence tests use
+local fixtures; the local Kind pilot has additionally exercised real collection
+and archive readback. Representative long-term capacity, external durable copy
+and university policy acceptance remain deployment checks.

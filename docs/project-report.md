@@ -2,8 +2,8 @@
 
 Release candidate: 0.2.0rc1. Scope follows the October final plan; the September
 Redis blueprint remains historical context. This is an implementation/evidence
-report. University deployment, independent sign-off and final model selection are
-not asserted to have happened.
+report, updated 30 October 2026. University deployment, independent sign-off and
+final model selection are not asserted to have happened.
 
 ## Problem and design
 
@@ -52,9 +52,10 @@ Sources: [Kubernetes RBAC guidance](https://kubernetes.io/docs/concepts/security
 The repository includes versioned contracts, real HTTP adapters, bounded model
 providers, immutable review/decision/history, execution/recovery state machines,
 real reader/harness, images/chart, archive/backup tools, optional coordinated daily
-backup, frozen A/B evaluation and this report/demo package. The full suite passed
-368 tests after the validator-v3 safety fix. Component tests use explicit
-recording boundaries; they are not live-cluster safety proofs.
+backup, frozen A/B evaluation and this report/demo package. The latest full suite
+passed 378 tests on 30 October 2026, including the later live-workflow regressions.
+The earlier frozen release snapshot records its original 368 tests. Component
+tests use explicit recording boundaries; they are not live-cluster safety proofs.
 
 A separate local `guardian-release` Kind cluster was created without changing the
 existing `guardian-test` cluster/default kubeconfig. Kubernetes 1.30.0, Docker
@@ -73,11 +74,47 @@ in the local evidence/history. The actual harness verified ServiceAccount Pod
 reads, initialization, normal operation and a new reader process after restart.
 This is a process-restart check, not a claim of pod/node disaster recovery.
 
-The image/model route, live readiness and backup/restore results are recorded in
-`release/local-verification.json`. Claims must follow that machine-readable record.
-No coding agent records the positive human decision. Actual forward execution,
-first baseline, later drift execution and live recovery acceptance remain distinct
-human-controlled gates; their recording protocol tests are already implemented.
+The earlier image/model route, pre-approval readiness and backup/restore results
+are preserved in `release/local-verification.json`. That dated snapshot is not
+the current action state. Frozen measurements are retained rather than rewritten.
+
+### Follow-up live workflow verification on 30 October 2026
+
+The local pilot completed the exact initial Role narrowing after an explicit
+user instruction to complete the previously approved change. The decision was
+submitted through the scoped governed-review API; model output did not grant
+authority. The resulting receipt recorded:
+
+| Check | Recorded result |
+| --- | --- |
+| Target | `guardian-release / guardian-demo / pod-reader` |
+| Source run | `run-ea472d505325402685f85ac3c77bfd5d` |
+| Action | `proposal-prepare-d57e04861f584042bdb0dec50b3ab986` |
+| Receipt | `receipt-9a9648812ee940bfb588bbdc21a1b18b` |
+| Outcome / apply / verification | `completed / confirmed / passed` |
+| Baseline activation | `true` |
+| Confirmed post-change resourceVersion | `60664` |
+| Independently checked Secret read / Pod read | `no / yes` |
+| Live API audit | 39 checks passed |
+| Repository tests | 378 passed; latest complete run took 42.805 seconds |
+
+Actual Streamlit checks covered report acknowledgement/rejection, fresh analysis,
+context revisions, governed rejection and outcome acknowledgement. The final
+governed context request queued revision 4; opening it displayed a real Ollama
+analysis that finished `NO_CHANGE` after the successful narrowing. The terminal
+resume/watch paths read the same saved outcome instead of generating new authority.
+All six pilot deployments were healthy at the final check.
+
+This audit found and fixed long-window coverage lock contention, concurrent
+functional-check collisions, stale execution evidence, windows beyond the source
+watermark and misleading approval/outcome displays. The earlier stopped action
+remains recorded as stale. Current success does not rewrite that failure.
+
+Raw pilot evidence/credentials remain private under ignored `data/pilot/`.
+Results above describe the observed local run, not a guarantee about a future
+cluster state. The isolated RBAC pilot did not install Hubble/Tetragon, and does
+not establish live eBPF coverage. Later drift execution, live recovery and
+independent university acceptance remain separate gates.
 
 ## Development comparison: failures included
 
@@ -128,9 +165,10 @@ The current evidence does not show an LLM advantage over A. A remains viable.
 
 ## Remaining human acceptance steps
 
-1. Open the prepared local dashboard and perform the exact action review and
-   separate recovery choice described in `demo-runbook.md`. Inspect the real
-   receipt, access/application checks, first baseline and notification afterward.
+1. Inspect/reproduce the completed initial action from the runbook, retaining the
+   exact receipt and access/application checks. A new owned scenario needs a new
+   explicit review; the existing successful Role is already narrowed. Do not reset
+   it merely to repeat a verification check.
 2. Introduce only the owned scenario drift, review its distinct proposal, and
    verify the second outcome. Rehearse stale/pause/incident/manual cases; a real
    recovery drill needs a controlled meaningful failure and explicit consent.

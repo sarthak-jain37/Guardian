@@ -1,11 +1,13 @@
-# Governed execution and exact recovery (Phase 4)
+# Governed execution and exact recovery
 
-Phase 4 supplies the real backend actuator and a tested local protocol. Execution
-is **disabled by default**. Local acceptance uses the actual graph, HTTP APIs,
-authentication, SQLite ledger and Streamlit controls, with recording Kubernetes
-and functional-harness boundaries. No live cluster write or lab acceptance is
-claimed. Phase 5 supplies the pinned demo application, meaningful installed
-behavioral harness, deployment identities and measured live pilot.
+The backend implements the actual conditional Role actuator, verification and
+exact recovery protocol. Execution is **disabled by default**. Automated tests use
+the actual graph, HTTP APIs, authentication, SQLite ledger and Streamlit controls
+with explicit recording cluster/harness boundaries. The separate local Kind pilot
+has also completed real initial narrowing, verified retained/removed access and
+activated its baseline. Live recovery and independent university acceptance are
+not established by that success. See [current results](project-report.md),
+[deployment](deployment.md) and the [demo runbook](demo-runbook.md).
 
 ## Workflow
 
@@ -104,7 +106,7 @@ reviewed harness and replace every artifact SHA256. Set
 `GUARDIAN_EXECUTION_POLICY=/absolute/path/execution.toml`, configure scoped auth,
 cluster ID and `GUARDIAN_CONTROLLED_NAMESPACES` consistently, and restart the
 backend. The template stays disabled and its placeholders cannot pass a check.
-Enable only after the Phase 5 disposable lab setup and manual prechecks. Never
+Enable only after the disposable lab setup and manual prechecks. Never
 turn missing coverage, behavior or UID assertions into passing constants.
 
 The harness is a **trusted operator boundary**, not a sandbox or model-chosen
@@ -116,7 +118,7 @@ argv without a shell, an explicit environment allowlist, a 1–60 second timeout
 64 KiB stdout cap, and terminates its subprocess group. Artifact changes invalidate
 readiness. Interpreter imports/dependencies and allowlisted external credentials
 remain operator-controlled deployment inputs; hashing a script is not a supply
-chain attestation. Phase 5 must pin that environment too.
+chain attestation. Pin and review that environment too.
 
 One JSON request on stdin:
 
@@ -189,6 +191,8 @@ responses, crash recovery and outcome acknowledgement. It uses no live cluster.
 The existing JSON demo separately validates the 20 consumer schemas and synthetic
 development scenarios; it does not stand in for live workload acceptance.
 
-For the read-only laptop UI and real Ollama analysis, use `analysis.md`. The live
-execution demo requires Phase 5's real workload/harness and deployment guide;
-there is deliberately no pretend passing installation command in this phase.
+For nonwriting report review and real Ollama analysis, use [analysis.md](analysis.md).
+The live execution demo requires the real workload/harness and private operator
+configuration documented in [demo-runbook.md](demo-runbook.md) and
+[deployment.md](deployment.md). The disabled example policy is not an executable
+passing configuration.

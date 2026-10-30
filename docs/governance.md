@@ -1,12 +1,12 @@
 # Authenticated governance foundation
 
-Phase 1 adds the authority/storage boundary. Phase 4 extends it with separately
-prepared [governed action and recovery](execution.md); execution defaults disabled.
+The authority/storage boundary is implemented alongside separately prepared
+[governed action and recovery](execution.md); execution defaults disabled.
 The old `/approval/*/decision`, `/approval/*/revert`, `/baselines/*/apply`,
 `/baselines/*/rollback` and `/telemetry/permission-proposals/*/decision` routes
 return `410 legacy_execution_retired`. Their historical read endpoints remain.
-The dashboard displays legacy findings as read only. Phase 3 adds a separate
-[authenticated analysis/report workspace](analysis.md), including acknowledge,
+The dashboard displays legacy findings as read only. The separate
+[authenticated analysis/report workspace](analysis.md) supports acknowledge,
 reject and context revisions; it cannot authorize cluster writes.
 
 Startup and external apply events retain observations without approving a baseline
@@ -27,8 +27,8 @@ directory must be writable and persist across backend restarts. SQLite WAL needs
 local persistent disk on a single host; do not place it on a shared network
 filesystem. This is separate from the development LangGraph checkpoint store.
 Database, WAL/SHM files and private registries are ignored. A consistent operational
-backup/restore procedure is part of phase 5; copying just an active SQLite DB file
-without its WAL is not an established backup procedure.
+backup/restore procedure is in [deployment.md](deployment.md); copying just an
+active SQLite DB file without its WAL is not an established backup procedure.
 
 Credentials are operator-issued opaque bearer tokens, with SHA-256 digests and
 expiry in a strict registry. Deliver the token privately to its named owner. Use
@@ -74,8 +74,8 @@ Every governance request reloads the registry. Expiry/removal/scope changes appl
 without restarting the backend. Missing/invalid authentication returns `401`;
 insufficient scope returns `403`; a missing/corrupt configured registry or ledger
 returns `503`. Without `GUARDIAN_AUTH_FILE`, no governance access is granted.
-Existing monitoring endpoints remain the legacy local interface. Phase 3's
-analysis/review workspace and Phase 4's action workspace use scoped API access.
+Existing monitoring endpoints remain the legacy local interface. The
+analysis/review and action workspaces use scoped API access.
 
 ## Review and decision API
 
@@ -105,14 +105,14 @@ Example decision body (the actor and UTC timestamps come from the server):
 ```
 
 `reject`, `acknowledge` and `request_context` create immutable decisions and durable
-resume records. In phase 1 they do not themselves resume a running graph, reject an
-old Redis queue entry or regenerate analysis. Those adapters/dispatcher are phase
-3. `approve_remediation` and `adopt_baseline` return `503` without recording any
-authority or delivery unless the Phase 4 backend independently prepared that exact
+resume records. In the integrated analysis/action workspace, context decisions
+also queue fresh capture/analysis; they do not act on old Redis queue entries.
+`approve_remediation` and `adopt_baseline` return `503` without recording any
+authority or delivery unless the backend independently prepared that exact
 action and the operator configured execution. Client actor/authority/deadline
 fields are rejected. Residual risk acceptance or supplied passing gates alone
-cannot enable a positive decision. Phase 4 adds optional separate exact recovery
-consent (`opt_in_recovery`, default false, with `expected_recovery_hash`).
+cannot enable a positive decision. Optional separate exact recovery
+consent uses `opt_in_recovery` (default false) with `expected_recovery_hash`.
 
 Review expiry is server publication time plus 24 hours. Publication replay cannot
 renew it. Conflicting contents under an existing ID, skipped case revisions,
@@ -120,7 +120,7 @@ changed case scope, mismatched expected hash/revision or a second decision fail.
 An exact decision replay returns the original record, including after expiry,
 without new authority, timestamps or deliveries. An expired undecided review is
 recorded as expired when read/decided. Scheduled closure/renewal and the independent
-five-minute positive execution window are integrated in phases 3–4.
+five-minute positive execution window are integrated in the current backend.
 
 Decision, history, state projection and resume intent commit together. The queue
 holds at most 64 unacknowledged records per scope; a full queue rolls back a new

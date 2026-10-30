@@ -1,7 +1,7 @@
 # Release responsibilities
 
-All workstreams are now authorized under this project-completion branch. The
-following are operational roles, not claims that a teammate has signed acceptance.
+The following are operational roles for the merged implementation, not claims
+that a teammate has signed acceptance.
 
 | Role | Deliverable / continuing responsibility |
 | --- | --- |
