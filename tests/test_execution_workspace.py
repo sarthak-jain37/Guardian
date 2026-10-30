@@ -77,3 +77,17 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertNotIn('Approve exact Role change',actions.options)
             self.assertFalse(any(b.label=='Queue independent readiness checks' for b in app.button))
         self.assertEqual(self.driver.applies,[])
+
+    def test_approval_pending_and_stopped_outcome_are_explicit(self):
+        run,review=self.prepared()
+        with patch('frontend.review_client.requests.request',side_effect=self.request):
+            app=self.open()
+            self.checkbox(app,'I accept the stated residual risks for this exact action').check()
+            self.button(app,'Record governed decision').click().run()
+            self.assertTrue(any('completion is not confirmed yet' in m.value for m in app.info))
+            self.advance(301)
+            self.execution.execute_next()
+            self.button(app,'Refresh execution status').click().run()
+            self.assertFalse(app.exception)
+            self.assertTrue(any('was not applied' in m.value and 'execution_start_deadline_expired' in m.value for m in app.error))
+            self.assertEqual(self.driver.applies,[])

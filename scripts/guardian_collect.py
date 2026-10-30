@@ -19,6 +19,8 @@ def main():
     parser.add_argument('--archive-directory',type=Path)
     parser.add_argument('--archive-keys',type=Path)
     parser.add_argument('--once',action='store_true')
+    parser.add_argument('--poll-seconds',type=int,choices=range(1,11),default=2,
+        help='audit/probe poll interval; default 2s leaves room inside the evidence freshness budget')
     parser.add_argument('--retention-days',type=int,choices=(90,365),default=90)
     parser.add_argument('--prune',action='store_true',help='apply acknowledged hot/archive retention; never touches control-plane files')
     args=parser.parse_args()
@@ -39,7 +41,7 @@ def main():
                 if args.prune:archive.prune_hot();archive.delete_expired()
             print(json.dumps(status),flush=True)
             if args.once:break
-            time.sleep(10)
+            time.sleep(args.poll_seconds)
     finally:
         follower.close();k8s.api_client.close()
 

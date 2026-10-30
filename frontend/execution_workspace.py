@@ -9,8 +9,11 @@ def _post(client,path,body):
     return client.call('POST',path,body=body,timeout=600)
 
 
-def _details(client,review,identity,can_review):
+@st.fragment(run_every='2s')
+def _details(client,identifier,identity,can_review):
+    review=client.call('GET','/execution/reviews/'+identifier)
     p=review['proposal'];identifier=p['proposal_id'];key='action_'+identifier
+    st.caption('Analysis run: '+review['source_run_id']+' · Action: '+identifier)
     st.write('**Governed action: '+p['action']+' · '+review['status']+'**')
     st.caption('Review deadline: '+p['review_expires_at']+
         ' · After approval, execution must start within '+str(p['execution_window_seconds'])+' seconds.')
@@ -80,10 +83,20 @@ def _details(client,review,identity,can_review):
                             _post(client,'/execution/decisions/'+decision['decision_id']+'/revoke',{'kind':revoke_kind,'reason':reason})
                             st.rerun()
     receipt=review['receipt']
+    if decision and decision['kind'] in ('approve_remediation','adopt_baseline'):
+        if not receipt or receipt['phase'] in ('requested','applying','verifying'):
+            st.info('Approval recorded. Execution is pending or running; completion is not confirmed yet. Status refreshes automatically.')
+        if st.button('Refresh execution status',key=key+'_refresh'):st.rerun()
     if receipt:
         st.write('Outcome: **'+receipt['phase']+'** · Apply: '+receipt['apply_status']+
             ' · Verification: '+receipt['verification_status']+' · Recovery: '+receipt['recovery_status'])
         if receipt['phase']=='manual':st.error('Manual intervention is required. Inspect the stored checks before acting.')
+        if receipt['phase'] in ('stale','failed'):
+            st.error('The approved action was not applied. Reason: '+str(review.get('outcome_reason') or
+                'A precondition changed or a check was unavailable; this older receipt has no detailed reason.')+
+                ' Prepare a fresh action after resolving the blocker; the old approval will not be replayed.')
+        if receipt['phase']=='completed':st.success('Completed: the approved action passed its required verification.')
+        if receipt['phase']=='rolled_back':st.warning('The change was applied, then restored under your separate recovery consent. The proposed baseline is not active.')
         st.caption('Baseline activated by this action: '+str(receipt['baseline_activated']))
         with st.expander('Durable receipt and verification evidence'):
             st.json(receipt);st.json(review['verification_evidence'])
@@ -128,11 +141,12 @@ def workspace(client,identity,scope,run):
         status=client.call('GET','/execution/preparations/'+preparation[2])
         st.caption('Readiness preparation: '+status['status']+' · '+str(status['error'] or 'Refresh to check progress.'))
     reviews=client.call('GET','/execution/reviews',params=params)['reviews']
+    reviews=[review for review in reviews if review['source_run_id']==run['run_id']]
     if reviews:
         by_id={r['proposal_id']:r for r in reviews}
         selected=st.selectbox('Governed action',list(by_id),format_func=lambda v:by_id[v]['role_name']+' · '+by_id[v]['action']+
-            ' · revision '+str(by_id[v]['revision'])+' · '+by_id[v]['status'])
-        _details(client,client.call('GET','/execution/reviews/'+selected),identity,can_review)
+            ' · revision '+str(by_id[v]['revision'])+' · '+by_id[v]['status']+' · '+v[-8:])
+        _details(client,selected,identity,can_review)
     else:st.caption('No independently prepared action is available yet.')
     notices=client.call('GET','/execution/notifications',params=params)['notifications']
     with st.expander('Outcome notifications'):
