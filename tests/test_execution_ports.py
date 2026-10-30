@@ -51,6 +51,31 @@ class ExecutionPortTests(unittest.TestCase):
         verifier,profile,script=self.harness('print("{}")')
         with self.assertRaises(ValueError):verifier.check(profile,demo_evidence(),'pre')
 
+    def test_concurrent_checks_share_workload_lock_across_verifier_instances(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        source='''import sys,json,fcntl,time
+from datetime import datetime,timezone
+request=json.load(sys.stdin)
+lock=open(__file__+'.busy','w')
+fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+time.sleep(.2)
+now=datetime.now(timezone.utc).isoformat()
+print(json.dumps({'schema_version':'guardian.functional-proof.v1','phase':request['phase'],
+'workload_uid':request['workload_uid'],'image_digest':request['image_digest'],
+'started_at':now,'completed_at':now,'runner_healthy':True,'dependencies_healthy':True,
+'checks':{'startup':'pass','normal':'pass','restart':'pass'},'evidence_refs':['serialized-test-harness']}))
+'''
+        verifier,profile,script=self.harness(source)
+        second=FunctionalVerifier(GovernanceStore(verifier.db.path))
+        barrier=Barrier(2)
+        def check(instance):
+            barrier.wait(timeout=2)
+            return instance.check(profile,demo_evidence(),'pre')
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results=list(pool.map(check,[verifier,second]))
+        self.assertTrue(all(set(result['checks'].values())=={'pass'} for result in results))
+
     def test_harness_digest_timeout_and_output_limits_fail_closed(self):
         verifier,profile,script=self.harness('import time\ntime.sleep(20)')
         with self.assertRaises(TimeoutError):verifier.check(profile,demo_evidence(),'pre')
