@@ -34,7 +34,8 @@ def workspace():
                 if not roles:st.info('No readable Roles were found in this namespace.')
                 else:
                     with st.form('analysis_intake'):
-                        role=st.selectbox('Role',roles,format_func=lambda r:r['name'])
+                        default_role=next((i for i,r in enumerate(roles) if r['name']=='pod-reader'),0) if scope['namespace']=='guardian-demo' else 0
+                        role=st.selectbox('Role',roles,index=default_role,format_func=lambda r:r['name'])
                         minutes=st.number_input('Observation window (minutes)',min_value=5,max_value=129600,
                             value=5 if scope['namespace']=='guardian-demo' else 10080)
                         note=st.text_area('Optional workload context',max_chars=2000,
@@ -83,7 +84,7 @@ def workspace():
             if run['proposal']:
                 st.subheader('Exact proposed change')
                 st.code(run['proposal']['diff'],language='diff')
-                st.caption('Preview only. No change has been authorized or applied.')
+                st.caption('Saved preview. This report does not authorize changes; the governed action and its actual outcome are shown below.')
                 with st.expander('Proposed Role and unchanged binding'):st.json(run['proposal'])
             else:st.info('No supported permission removal was proposed. Review the evidence and missing context above.')
             st.write('Report review: **'+str(run['review_state'])+'**')

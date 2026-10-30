@@ -17,7 +17,7 @@ def _details(client,identifier,identity,can_review):
     st.write('**Governed action: '+p['action']+' · '+review['status']+'**')
     st.caption('Review deadline: '+p['review_expires_at']+
         ' · After approval, execution must start within '+str(p['execution_window_seconds'])+' seconds.')
-    st.caption('Target UID '+p['target']['uid']+' · resourceVersion '+p['target']['resource_version'])
+    st.caption('Approved snapshot: target UID '+p['target']['uid']+' · expected resourceVersion '+p['target']['resource_version'])
     if p['action']=='remediate':st.code(p['diff'],language='diff')
     else:st.info('Adoption records these exact current rules as desired state. It does not change the Role.')
     with st.expander('Exact rules, unchanged binding and approval hash'):
@@ -32,7 +32,7 @@ def _details(client,identifier,identity,can_review):
         st.json(review['verification_contract'])
         st.caption('Source analysis hash: '+review['source_report_hash'])
     for uncertainty in p['uncertainty']:st.warning(uncertainty)
-    if review['execution_blockers']:st.info('Current action blockers: '+', '.join(review['execution_blockers']))
+    if review['execution_blockers'] and review['status']=='OPEN':st.info('Current action blockers: '+', '.join(review['execution_blockers']))
     recovery=review['recovery_contract']
     if recovery:
         with st.expander('Exact recovery rules and risks'):
@@ -66,6 +66,13 @@ def _details(client,identifier,identity,can_review):
     decision=review['decision']
     if decision:
         st.write('Decision: **'+decision['kind']+'** · '+decision['actor'])
+        if decision['kind']=='request_context':
+            successor=review.get('context_successor_run_id')
+            if successor:
+                st.info('Fresh analysis queued: '+successor)
+                if st.button('Open revised analysis',key=key+'_context_run'):
+                    st.session_state['guardian_selected_run']=successor;st.rerun()
+            else:st.info('Context recorded. Waiting for the backend to queue fresh analysis; this status refreshes automatically.')
         st.caption('Execution start deadline: '+str(decision['execution_expires_at'])+
             ' · Forward authority revoked: '+str(decision['revoked']))
         if review['advance_recovery_consent']:
@@ -98,6 +105,7 @@ def _details(client,identifier,identity,can_review):
         if receipt['phase']=='completed':st.success('Completed: the approved action passed its required verification.')
         if receipt['phase']=='rolled_back':st.warning('The change was applied, then restored under your separate recovery consent. The proposed baseline is not active.')
         st.caption('Baseline activated by this action: '+str(receipt['baseline_activated']))
+        if receipt.get('post_resource_version'):st.caption('Confirmed resourceVersion after application: '+receipt['post_resource_version'])
         with st.expander('Durable receipt and verification evidence'):
             st.json(receipt);st.json(review['verification_evidence'])
         if (can_review and receipt['phase']=='manual' and receipt['apply_status']=='confirmed'

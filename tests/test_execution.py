@@ -482,6 +482,7 @@ class ExecutionTests(unittest.TestCase):
         latest=self.analysis.get(runs[0]['run_id'],self.human)
         self.assertIn(decision['decision_id'],latest['intake']['context_note'])
         self.assertEqual(latest['intake']['supersedes_run_id'],run['run_id'])
+        self.assertEqual(self.execution.review_detail(p['proposal_id'],self.human)['context_successor_run_id'],latest['run_id'])
         self.assertEqual(self.driver.applies,[])
         self.assertEqual(self.analysis.get(run['run_id'],self.human)['report'],run['report'])
 

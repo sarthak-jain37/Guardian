@@ -771,6 +771,10 @@ class ExecutionStore:
             outcome_reason=json.loads(stopped[0]).get('reason_code') if stopped else None
             row=db.execute('SELECT payload FROM decisions WHERE proposal_id=?',(proposal_id,)).fetchone()
             decision=json.loads(row[0]) if row else None
+            successor=None
+            if decision and decision['kind']=='request_context':
+                successor=db.execute('SELECT run_id FROM analysis_runs WHERE actor=? AND idempotency_key=?',
+                    (self.service.actor,'governed-context-'+decision['decision_id'])).fetchone()
             if decision:
                 decision['revoked']=bool(db.execute("SELECT 1 FROM execution_revocations WHERE decision_id=? AND kind IN ('forward','all')",
                     (decision['decision_id'],)).fetchone())
@@ -782,7 +786,8 @@ class ExecutionStore:
         usage=plan['evidence'].get('usage')
         return {**review,'execution_available':review['execution_available'] and review['status']=='OPEN' and not blockers,
             'execution_blockers':review['execution_blockers']+blockers,'backend_readiness':backend_report.get('readiness'),
-            'decision':decision,'advance_recovery_consent':consent,'verification_evidence':checks,'outcome_reason':outcome_reason,
+            'decision':decision,'context_successor_run_id':successor[0] if successor else None,
+            'advance_recovery_consent':consent,'verification_evidence':checks,'outcome_reason':outcome_reason,
             'usage_window':usage['query_window'] if usage else None,'usage_processed_through':usage['processed_through'] if usage else None,
             'source_report_hash':plan['source_report_hash'],'source_run_id':plan['source_run_id'],'verification_contract':{
             'profile':plan['profile'],'profile_hash':plan['profile_hash'],'pre_functional':plan['pre_functional'],
