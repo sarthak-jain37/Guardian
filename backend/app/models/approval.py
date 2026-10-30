@@ -2,13 +2,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-class ApprovalDecision(BaseModel):
-    decision: Literal["promote", "reject", "revert", "dismiss"]
-    actor: str = Field(default="admin")
-    note: str | None = None
-    apply_to_cluster: bool = Field(default=False)
-
-
 class ExecutionReceipt(BaseModel):
     status: str = "success"
     applied: list[str] = Field(default_factory=list)

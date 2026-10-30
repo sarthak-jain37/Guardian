@@ -1,0 +1,42 @@
+{{- if .Values.collector.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: {{ .Release.Name }}-collector}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: {{ .Release.Name }}-collector}
+  template:
+    metadata:
+      labels: {app: {{ .Release.Name }}-collector, guardian-component: collector}
+    spec:
+      serviceAccountName: {{ .Release.Name }}-collector
+      securityContext: {{- include "guardian.security" . | nindent 8 }}
+      nodeSelector: {{ toYaml .Values.nodeSelector | nindent 8 }}
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector: {matchLabels: {app: {{ .Release.Name }}-backend}}
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: collector
+          image: {{ include "guardian.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- include "guardian.containerSecurity" . | nindent 12 }}
+          resources: {{ toYaml .Values.resources.collector | nindent 12 }}
+          command: [python, -m, scripts.guardian_collect]
+          args: [--database, /state/guardian/governance.sqlite3, --source-policy, /etc/guardian/collection/source.json, --audit-policy, /etc/guardian/collection/audit-policy.yaml, --audit-log, "/audit/{{ .Values.collector.auditFile }}", --archive-directory, /state/archive, --archive-keys, /etc/guardian/archive/archive-keys.json]
+          volumeMounts:
+            - {name: state, mountPath: /state}
+            - {name: audit, mountPath: /audit, readOnly: true}
+            - {name: collection, mountPath: /etc/guardian/collection, readOnly: true}
+            - {name: archive, mountPath: /etc/guardian/archive, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: state, persistentVolumeClaim: {claimName: {{ .Release.Name }}-state}}
+        - {name: audit, hostPath: {path: {{ required "collector.auditHostPath must be operator configured" .Values.collector.auditHostPath | quote }}, type: Directory}}
+        - {name: collection, secret: {secretName: {{ .Values.secrets.collection }}, defaultMode: 0440}}
+        - {name: archive, secret: {secretName: {{ .Values.secrets.archiveKeys }}, defaultMode: 0440}}
+        - {name: tmp, emptyDir: {sizeLimit: 128Mi}}
+{{- end }}

@@ -116,54 +116,8 @@ class PermissionProposals:
             proposal.update(status='blocked',explanation=str(exc))
             await self.put(proposal);await self.log(proposal,'proposal_blocked',reason=str(exc))
 
-    async def decide(self,identifier,decision,actor,note):
-        if decision not in ('accept','reject') or not actor.strip():raise ValueError('A valid decision and actor name are required')
-        token=str(uuid.uuid4());lock=self.prefix+':lock:'+identifier
-        if not await self.redis.set(lock,token,nx=True,ex=1800):raise ValueError('Another decision is in progress')
-        try:
-            proposal=await self.get(identifier)
-            if not proposal:raise LookupError('Proposal not found')
-            if proposal['status']!='pending':raise ValueError('Proposal is no longer pending; repeated decisions are not applied')
-            # Log the decision before any Kubernetes write, including failed attempts.
-            await self.log(proposal,'decision',decision=decision,actor=actor,note=note)
-            proposal.update(decided_by=actor,decision=decision,note=note,decided_at=now())
-            if decision=='reject':
-                proposal['status']='rejected';await self.put(proposal);return proposal
-            proposal['status']='applying';await self.put(proposal)
-            applied=[]
-            try:
-                raw_latest=await self.redis.get(self.review_prefix+proposal['uid'])
-                latest=json.loads(raw_latest) if raw_latest else {}
-                if latest.get('status')!='assessed' or latest.get('severity',0)<=8 or not latest.get('critical_confirmed') or latest.get('fingerprint')!=proposal['assessment_fingerprint']:
-                    raise ValueError('The critical assessment changed or is unavailable; review a new proposal')
-                pod=self.k8s.api_client.sanitize_for_serialization(await asyncio.to_thread(self.k8s.core_api.read_namespaced_pod,proposal['pod'],proposal['namespace'],_request_timeout=30))
-                if pod['metadata']['uid']!=proposal['uid'] or pod.get('spec',{}).get('serviceAccountName','default')!=proposal['service_account']:
-                    raise ValueError('Pod instance or service account changed; review a new proposal')
-                inventory=self.k8s.api_client.sanitize_for_serialization(await asyncio.to_thread(self.k8s.core_api.list_namespaced_pod,proposal['namespace'],_request_timeout=30))
-                affected={p['metadata']['uid']:p['metadata']['name'] for p in inventory.get('items',[]) if p.get('spec',{}).get('serviceAccountName','default')==proposal['service_account']}
-                if affected!=proposal.get('affected_instances',{}):raise ValueError('Pods sharing this service account changed; review a new proposal')
-                state=await asyncio.to_thread(self.k8s.get_rbac_state)
-                if digest(state)!=proposal['snapshot_hash']:raise ValueError('RBAC changed since the proposal; no changes applied')
-                # Verify all versions before starting, then enforce each resourceVersion on replace.
-                for change in proposal['changes']:
-                    reader=self.k8s.rbac_api.read_namespaced_role if change['kind']=='Role' else self.k8s.rbac_api.read_namespaced_role_binding
-                    current=self.k8s.api_client.sanitize_for_serialization(await asyncio.to_thread(reader,change['name'],proposal['namespace'],_request_timeout=30))
-                    if current['metadata'].get('resourceVersion')!=change['before']['metadata'].get('resourceVersion') or current['metadata'].get('uid')!=change['before']['metadata'].get('uid'):
-                        raise ValueError('Resource changed since proposal; no changes applied')
-                for change in proposal['changes']:
-                    writer=self.k8s.rbac_api.replace_namespaced_role if change['kind']=='Role' else self.k8s.rbac_api.replace_namespaced_role_binding
-                    response=await asyncio.to_thread(writer,change['name'],proposal['namespace'],change['after'],_request_timeout=30)
-                    receipt={'kind':change['kind'],'name':change['name'],'result':self.k8s.api_client.sanitize_for_serialization(response)}
-                    applied.append(receipt)
-                    await self.log(proposal,'resource_applied',actor=actor,resource=receipt)
-                proposal.update(status='applied',applied_at=now(),receipt=applied)
-            except Exception as exc:
-                proposal.update(status='partial_failure' if applied else 'conflict',error=str(exc),receipt=applied)
-            await self.put(proposal)
-            await self.log(proposal,'execution_result',status=proposal['status'],receipt=applied,error=proposal.get('error'))
-            return proposal
-        finally:
-            await self.redis.eval("if redis.call('GET',KEYS[1]) == ARGV[1] then return redis.call('DEL',KEYS[1]) end return 0",1,lock,token)
+    async def decide(self, identifier, decision, actor, note):
+        raise ValueError("legacy_execution_retired: use authenticated governed review")
 
     async def history(self):
         return [{'id':identifier,**fields,'details':json.loads(fields['details'])} for identifier,fields in await self.redis.xrevrange(self.prefix+':decisions',count=200)]

@@ -1,8 +1,7 @@
-from agents.summarizer import analyse_document
+import asyncio
 from backend.app.services.kubernetes_service import KubernetesService
 from backend.app.services.permission_scanner import scan_dangerous_permissions
 from backend.app.services.script_runner import run_apply_script, run_modify_script
-from backend.app.services.baseline_service import create_baseline
 from backend.app.services.drift_detector import run_drift_scan
 from backend.app.services.redis_service import (
     get_last_processed_timestamp,
@@ -42,22 +41,14 @@ async def process_events(data, redis, k8s: KubernetesService) -> None:
         last_processed_modify = parse_timestamp(last_processed_modify)
 
     if most_recent_apply and (last_processed_apply is None or most_recent_apply > last_processed_apply):
-        baseline = run_apply_script(k8s)
-        
-        # Create a baseline via baseline_service instead of raw save_rbac_state()
-        await create_baseline(
-            rbac_state=baseline,
-            sa_key="__CLUSTER__",
-            status="ACTIVE",
-            approved_by="kubectl-apply",
-            run_id=None,
-            redis=redis,
-        )
-        await save_rbac_state(BASELINE_KEY, baseline, redis)
+        observed = await asyncio.to_thread(run_apply_script, k8s)
+        # fieldManager/userAgent are provenance, never approval. An external
+        # apply updates observed state without replacing approved desired state.
+        await save_rbac_state(CURRENT_KEY, observed, redis)
         await set_last_processed_timestamp("apply", most_recent_apply.isoformat(), redis)
 
         # Trigger dangerous permission scan on new baseline apply
-        findings = scan_dangerous_permissions(baseline)
+        findings = scan_dangerous_permissions(observed)
         await save_dangerous_permissions(findings, redis)
         
     if most_recent_modify and (last_processed_modify is None or most_recent_modify > last_processed_modify):
@@ -68,16 +59,13 @@ async def process_events(data, redis, k8s: KubernetesService) -> None:
             pass
 
         baseline = await get_rbac_state(BASELINE_KEY, redis)
-        current, diff_dict = run_modify_script(k8s, baseline)
+        current, diff_dict = await asyncio.to_thread(run_modify_script, k8s, baseline)
         
         await save_rbac_state(CURRENT_KEY, current, redis)
         
         if diff_dict:
-            try:
-                llm_response = analyse_document(diff_dict)
-            except Exception:
-                llm_response = "Automated analysis unavailable"
-            
+            llm_response = "Observed RBAC change; evidence-backed analysis runs in the scoped analysis worker."
+
             await save_drift_event(diff_dict, llm_response, redis)
         
         await set_last_processed_timestamp("modify", most_recent_modify.isoformat(), redis)

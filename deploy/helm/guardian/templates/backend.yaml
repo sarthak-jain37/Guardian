@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: {{ .Release.Name }}-backend}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: {{ .Release.Name }}-backend}
+  template:
+    metadata:
+      labels: {app: {{ .Release.Name }}-backend, guardian-component: backend}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/config.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ .Release.Name }}-backend
+      securityContext: {{- include "guardian.security" . | nindent 8 }}
+      nodeSelector: {{ toYaml .Values.nodeSelector | nindent 8 }}
+      containers:
+        - name: backend
+          image: {{ include "guardian.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- include "guardian.containerSecurity" . | nindent 12 }}
+          ports: [{containerPort: 8000, name: http}]
+          resources: {{ toYaml .Values.resources.backend | nindent 12 }}
+          env:
+            - {name: GUARDIAN_RECOVERY_MODE, value: {{ .Values.execution.recoveryMode | quote }}}
+            - {name: GUARDIAN_CLUSTER_ID, value: {{ .Values.clusterId | quote }}}
+            - {name: GUARDIAN_CONTROLLED_NAMESPACES, value: {{ .Values.targetNamespace | quote }}}
+            - {name: GUARDIAN_ANALYSIS_NAMESPACES, value: {{ .Values.targetNamespace | quote }}}
+            - {name: GUARDIAN_GOVERNANCE_DB, value: /state/guardian/governance.sqlite3}
+            - {name: GUARDIAN_AUTH_FILE, value: /etc/guardian/auth/registry.json}
+            - {name: GUARDIAN_MODEL_PROFILE, value: /etc/guardian/config/model.toml}
+            - {name: GUARDIAN_ARCHIVE_DIRECTORY, value: /state/archive}
+            - {name: GUARDIAN_ARCHIVE_KEYS, value: /etc/guardian/archive/archive-keys.json}
+            - {name: REDIS_URL, value: "redis://{{ .Release.Name }}-redis:6379/0"}
+            - {name: POD_REVIEW_ENABLED, value: "false"}
+            - {name: KUBERNETES_AUDIT_LOG_PATH, value: /state/unused-legacy-audit.log}
+            {{- if .Values.execution.enabled }}
+            - {name: GUARDIAN_EXECUTION_POLICY, value: /etc/guardian/execution/execution.toml}
+            {{- end }}
+          readinessProbe: {httpGet: {path: /ready, port: http}, initialDelaySeconds: 5, periodSeconds: 5}
+          livenessProbe: {httpGet: {path: /, port: http}, initialDelaySeconds: 30, periodSeconds: 15}
+          volumeMounts:
+            - {name: state, mountPath: /state}
+            - {name: tmp, mountPath: /tmp}
+            - {name: auth, mountPath: /etc/guardian/auth, readOnly: true}
+            - {name: archive, mountPath: /etc/guardian/archive, readOnly: true}
+            - {name: config, mountPath: /etc/guardian/config, readOnly: true}
+            {{- if .Values.execution.enabled }}
+            - {name: execution, mountPath: /etc/guardian/execution, readOnly: true}
+            {{- end }}
+      volumes:
+        - {name: state, persistentVolumeClaim: {claimName: {{ .Release.Name }}-state}}
+        - {name: tmp, emptyDir: {sizeLimit: 256Mi}}
+        - {name: config, configMap: {name: {{ .Release.Name }}-config}}
+        - {name: auth, secret: {secretName: {{ .Values.secrets.auth }}, defaultMode: 0440}}
+        - {name: archive, secret: {secretName: {{ .Values.secrets.archiveKeys }}, defaultMode: 0440}}
+        {{- if .Values.execution.enabled }}
+        - {name: execution, secret: {secretName: {{ .Values.execution.policySecret }}, defaultMode: 0440}}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: {{ .Release.Name }}-backend}
+spec:
+  selector: {app: {{ .Release.Name }}-backend}
+  ports: [{name: http, port: 8000, targetPort: http}]

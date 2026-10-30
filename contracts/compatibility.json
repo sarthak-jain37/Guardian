@@ -1,15 +1,15 @@
 {
   "schema_version": "guardian.contract-compatibility.v1",
-  "release": "guardian.validation-handoff.v1",
-  "status": "proposed_pending_component_acceptance",
+  "release": "guardian.0.2.0rc1",
+  "status": "local_release_candidate_external_acceptance_pending",
   "source_plan": "Guardian Final Team Architecture and Implementation Plan v4.0",
-  "base_commit": "66ad8f2",
+  "base_commit": "997603d",
   "release_commit": null,
-  "decision_record": "contracts/decisions/0005-validation-handoff.md",
+  "decision_record": "contracts/decisions/0008-release-candidate.md",
   "runtime_versions": {
     "graph_version": "guardian.graph.v7",
     "state_version": "guardian.state.v7",
-    "validator_version": "guardian.validator.v2",
+    "validator_version": "guardian.validator.v3",
     "canonicalization_version": "guardian.sorted-json-sha256.v1",
     "prompt_version": "guardian.bounded-stages.v4",
     "model_output_version": "guardian.model-output.v2"
@@ -24,7 +24,7 @@
         "orchestration",
         "drift"
       ],
-      "acceptance": "pending"
+      "acceptance": "local_preview_integration_verified"
     },
     {
       "name": "evidence",
@@ -33,7 +33,7 @@
       "consumers": [
         "orchestration"
       ],
-      "acceptance": "pending"
+      "acceptance": "local_preview_integration_verified"
     },
     {
       "name": "request",
@@ -42,7 +42,7 @@
       "consumers": [
         "orchestration"
       ],
-      "acceptance": "pending"
+      "acceptance": "local_preview_integration_verified"
     },
     {
       "name": "report",
@@ -52,28 +52,28 @@
         "backend",
         "dashboard"
       ],
-      "acceptance": "pending"
+      "acceptance": "local_preview_integration_verified"
     },
     {
       "name": "readiness",
       "schema_id": "guardian.readiness.v1",
-      "producer": "deterministic_orchestration_checks",
+      "producer": "deterministic_orchestration_and_backend_checks",
       "consumers": [
         "backend",
         "dashboard"
       ],
-      "acceptance": "pending"
+      "acceptance": "local_recording_actuator_integration_verified_live_acceptance_pending"
     },
     {
       "name": "proposal",
       "schema_id": "guardian.proposal.v2",
-      "producer": "orchestration",
+      "producer": "orchestration_preview_and_backend_action_preparation",
       "consumers": [
         "backend",
         "dashboard",
         "executor"
       ],
-      "acceptance": "pending"
+      "acceptance": "local_recording_actuator_integration_verified_live_acceptance_pending"
     },
     {
       "name": "test_decision",
@@ -91,7 +91,7 @@
       "consumers": [
         "orchestration_validator"
       ],
-      "acceptance": "module_internal"
+      "acceptance": "local_preview_integration_verified"
     },
     {
       "name": "plan",
@@ -100,7 +100,7 @@
       "consumers": [
         "orchestration_validator"
       ],
-      "acceptance": "module_internal"
+      "acceptance": "local_preview_integration_verified"
     },
     {
       "name": "run_versions",
@@ -127,7 +127,7 @@
       "consumers": [
         "orchestration_worker"
       ],
-      "acceptance": "pending"
+      "acceptance": "local_preview_integration_verified"
     },
     {
       "name": "model_result",
@@ -136,7 +136,7 @@
       "consumers": [
         "orchestration_worker"
       ],
-      "acceptance": "pending"
+      "acceptance": "local_preview_integration_verified"
     },
     {
       "name": "evidence_tool_request",
@@ -145,7 +145,7 @@
       "consumers": [
         "orchestration_worker"
       ],
-      "acceptance": "pending"
+      "acceptance": "local_preview_integration_verified"
     },
     {
       "name": "evidence_tool_result",
@@ -154,7 +154,7 @@
       "consumers": [
         "orchestration_worker"
       ],
-      "acceptance": "pending"
+      "acceptance": "local_preview_integration_verified"
     },
     {
       "name": "work_item",
@@ -181,7 +181,7 @@
       "consumers": [
         "orchestration"
       ],
-      "acceptance": "pending"
+      "acceptance": "local_recording_actuator_integration_verified_live_acceptance_pending"
     },
     {
       "name": "preflight",
@@ -190,7 +190,7 @@
       "consumers": [
         "orchestration"
       ],
-      "acceptance": "pending"
+      "acceptance": "local_recording_actuator_integration_verified_live_acceptance_pending"
     },
     {
       "name": "execution_receipt",
@@ -199,7 +199,28 @@
       "consumers": [
         "orchestration"
       ],
-      "acceptance": "pending"
+      "acceptance": "local_recording_actuator_integration_verified_live_acceptance_pending"
     }
-  ]
+  ],
+  "capabilities": {
+    "model_providers": [
+      "ollama",
+      "llama-cpp",
+      "vllm"
+    ],
+    "backend_analysis_modes": [
+      "preview"
+    ],
+    "execution_available": false,
+    "live_lab_acceptance": false,
+    "execution_implementation_available": true,
+    "execution_default_enabled": false,
+    "backend_action_modes": [
+      "governed_backend_preparation"
+    ],
+    "helm_deployment_available": true,
+    "local_kind_pilot": true,
+    "held_out_evaluation_accepted": false,
+    "validator_version": "guardian.validator.v3"
+  }
 }

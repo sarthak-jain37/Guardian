@@ -11,7 +11,7 @@ from langgraph.types import Command
 
 from .adapters.local import (FixtureEvidencePort, LocalTestStore, PreviewVerificationPort,
                              RecordingBaselinePort, RecordingExecutor, SimulatedVerificationPort)
-from .adapters.models import LlamaCppModelClient, ScriptedModelClient, VllmModelClient
+from .adapters.models import LlamaCppModelClient, ScriptedModelClient, VllmModelClient, OllamaModelClient
 from .modeling import ModelConfig, load_profile
 from .contracts import AnalysisRequest, EvidenceBundle, utc_now
 from .fixtures import demo_evidence
@@ -70,6 +70,8 @@ def configured_model(settings):
         model.config = config
     elif config.provider == "llama-cpp":
         model = LlamaCppModelClient(config.model_path, config=config)
+    elif config.provider == "ollama":
+        model = OllamaModelClient(config)
     else:
         model = VllmModelClient(config)
     return model, config.model_dump(mode="json")

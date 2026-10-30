@@ -4,6 +4,19 @@ Guardian is a Kubernetes RBAC monitoring project designed to detect changes to R
 
 The project monitors Kubernetes audit events, maintains an RBAC baseline, detects differences between the expected and current RBAC state, stores detected drift events, and exposes them through a FastAPI backend and Streamlit frontend.
 
+Project completion is tracked in [implementation phases](docs/implementation-phases.md).
+The current integrated laptop workflow is in [analysis and review](docs/analysis.md),
+with [audit evidence/history](docs/evidence.md) and [Ollama model setup](docs/models.md).
+The default laptop model is now `qwen3.5:4b` through Ollama; GGUF instructions below
+apply to the optional llama.cpp profile. Phases 1–6 have implementation and local
+verification; [governed action and recovery](docs/execution.md) uses recording
+boundaries for local acceptance. The [complete demo steps](docs/demo-runbook.md), [deployment guide](docs/deployment.md) and [project report](docs/project-report.md) distinguish tested local behavior from remaining human/university acceptance.
+
+Phase 1 retires the legacy mutation routes and adds [authenticated governance](docs/governance.md).
+Monitoring remains available. Execution defaults disabled; Phase 4 requires a
+private controlled-scope policy, real verification harness and exact human approval.
+Observed changes never create an approved baseline automatically. Older Redis baseline records are retained as unverified history.
+
 ## Current Project Structure
 
 ```text
@@ -64,7 +77,7 @@ Apply Event    Modify Event
    │               │
    ▼               ▼
 Update        Compare Baseline
-Baseline      and Current State
+Observation   and Current State
    │               │
    ▼               ▼
  Redis        Drift Detection
@@ -90,7 +103,7 @@ Events are currently divided into two groups.
 * `kubectl-client-side-apply`
 * `kubectl-server-side-apply`
 
-When a new apply event is detected, Guardian retrieves the current RBAC state from Kubernetes and stores it as the baseline.
+When a new apply event is detected, Guardian retrieves the current RBAC state and stores it as an observation. Apply-like provenance does not approve a baseline.
 
 ### Modify Events
 
@@ -289,7 +302,7 @@ Open `http://localhost:8501` to view the live dashboard.
 
 ## Triggering Demo & Drift Events
 
-To test live baseline creation and drift detection:
+To test live observation capture (cluster setup commands below require an authorized disposable environment):
 
 ### 1. Establish Baseline (Apply Event)
 
@@ -311,7 +324,7 @@ EOF
 kubectl apply -f demo-role.yaml
 ```
 
-The worker detects the `kubectl-apply` event and seeds the RBAC baseline in Redis.
+The worker detects the `kubectl-apply` event and updates observed state in Redis. It does not approve a baseline. A first governed baseline requires the later execution/adoption and verification integration.
 
 ### 2. Introduce RBAC Drift (Modify Event)
 
@@ -335,10 +348,11 @@ kubectl patch role test-role -n default --type='json' \
 
 ### 3. Review Live Results
 
-Within 10 seconds:
-1. The backend worker extracts the diff using DeepDiff.
-2. The local Qwen LLM analyzes the security impact of the modification.
-3. The live drift event, diff cards, and LLM summary appear on the Streamlit dashboard at `http://localhost:8501`.
+The legacy worker can display observed differences and optional local-model
+explanations in the Streamlit dashboard at `http://localhost:8501`. Polling and
+model latency affect when results appear. These are observations, not approved
+baselines or verified remediation. The integrated initial-hardening/drift demo
+is delivered in the completion phases linked above.
 
 ### 4. Reset and Rerun the Demo
 
@@ -352,7 +366,9 @@ kubectl delete role test-role -n default
 redis-cli del rbac:drift:events
 ```
 
-(Or redis-cli flushall to wipe everything and restart the backend).
+Retain decision and evidence history needed for reporting. Use a dedicated demo
+instance and scenario-specific cleanup; the new governance ledger is independent
+of these legacy Redis event keys.
 
 
 

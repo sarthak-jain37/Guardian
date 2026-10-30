@@ -1,0 +1,19 @@
+apiVersion: audit.k8s.io/v1
+kind: Policy
+rules:
+  - level: Metadata
+    nonResourceURLs: ["/version"]
+  - level: Metadata
+    resources:
+      - group: rbac.authorization.k8s.io
+        resources: [roles, rolebindings, clusterroles, clusterrolebindings]
+  - level: Metadata
+    namespaces: [guardian-demo]
+    resources:
+      - group: ""
+        resources: [pods, pods/log, secrets, configmaps, serviceaccounts]
+      - group: apps
+        resources: [deployments, replicasets, daemonsets, statefulsets]
+      - group: batch
+        resources: [jobs, cronjobs]
+  - level: None

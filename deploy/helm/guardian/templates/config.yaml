@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+data:
+  model.toml: |
+    profile = {{ ternary "lab" "dev-laptop" (not (empty .Values.model.revision)) | quote }}
+    provider = "ollama"
+    model_name = {{ .Values.model.name | quote }}
+    endpoint = {{ .Values.model.endpoint | quote }}
+    {{- if .Values.model.revision }}
+    model_revision = {{ .Values.model.revision | quote }}
+    {{- end }}
+    context_length = 8192
+    max_output_tokens = 2048
+    request_timeout_seconds = 180
+    active_run_timeout_seconds = 600
+    concurrency = 1
+    queue_limit = 4
+    temperature = 0.0
+    seed = 17

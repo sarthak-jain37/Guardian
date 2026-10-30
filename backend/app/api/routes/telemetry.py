@@ -1,4 +1,3 @@
-from typing import Literal
 import asyncio
 from fastapi import APIRouter, Query, Request
 from backend.app.services.pod_evidence import pod_evidence
@@ -145,11 +144,6 @@ async def configuration(request: Request, namespace: str, pod: str):
                             detail='Could not read pod configuration from Kubernetes') from exc
 
 
-class PermissionDecision(BaseModel):
-    decision: Literal['accept','reject']
-    actor: str = Field(min_length=1,max_length=100)
-    note: str = Field(default='',max_length=2000)
-
 @router.get('/permission-proposals')
 async def permission_proposals(request: Request):
     return {'proposals':await request.app.state.permission_proposals.list()}
@@ -159,9 +153,6 @@ async def permission_history(request: Request):
     return {'history':await request.app.state.permission_proposals.history()}
 
 @router.post('/permission-proposals/{identifier}/decision')
-async def permission_decision(request: Request, identifier: str, body: PermissionDecision):
-    from fastapi import HTTPException
-    try:
-        return await request.app.state.permission_proposals.decide(identifier,body.decision,body.actor,body.note)
-    except LookupError as exc:raise HTTPException(404,str(exc)) from exc
-    except ValueError as exc:raise HTTPException(409,str(exc)) from exc
+async def permission_decision(identifier: str):
+    from backend.app.api.routes.approval import legacy_write_disabled
+    legacy_write_disabled()

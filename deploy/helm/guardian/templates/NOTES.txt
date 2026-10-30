@@ -1,0 +1,7 @@
+Guardian {{ .Chart.AppVersion }} installed with execution.enabled={{ .Values.execution.enabled }}.
+Local SQLite requires one host/local persistent disk. Keep PVCs and encryption keys.
+The target workload is separate from this chart. Helm rollback does not restore RBAC or DB data.
+Use loopback port-forward, or an approved TLS/authenticated lab gateway:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-dashboard 8501:8501
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-backend 8000:8000
+See docs/deployment.md and docs/demo-runbook.md.

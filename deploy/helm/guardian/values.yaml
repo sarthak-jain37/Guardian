@@ -1,0 +1,56 @@
+image:
+  repository: guardian
+  tag: "0.2.0-rc.1"
+  digest: ""
+  pullPolicy: IfNotPresent
+redisImage: "redis:7.4.2-bookworm"
+clusterId: guardian-release
+targetNamespace: guardian-demo
+targetRole: pod-reader
+model:
+  endpoint: "http://host.docker.internal:11434"
+  name: "qwen3.5:4b"
+  revision: null
+  bridge:
+    enabled: false
+    secret: guardian-model-bridge
+execution:
+  enabled: false
+  recoveryMode: optional_advance_exact
+  policySecret: guardian-execution
+secrets:
+  auth: guardian-auth
+  worker: guardian-worker
+  archiveKeys: guardian-archive
+  collection: guardian-collection
+collector:
+  enabled: true
+  auditHostPath: /var/log/guardian-audit
+  auditFile: audit.log
+storage:
+  size: 5Gi
+  workerSize: 1Gi
+  redisSize: 1Gi
+  className: ""
+  keep: true
+nodeSelector: {}
+resources:
+  backend:
+    requests: {cpu: 250m, memory: 512Mi}
+    limits: {cpu: "2", memory: 2Gi}
+  worker:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "2", memory: 1Gi}
+  collector:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  dashboard:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 1Gi}
+networkPolicy:
+  enabled: true
+backup:
+  enabled: false
+  schedule: "0 2 * * *"
+  keySecret: guardian-backup-key
+  size: 5Gi

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import uuid
@@ -6,7 +7,6 @@ from typing import Any
 from deepdiff import DeepDiff
 from redis.asyncio import Redis
 
-from agents.summarizer import analyse_document
 from backend.app.services.baseline_service import (
     create_baseline,
     get_active_baseline,
@@ -19,6 +19,7 @@ from backend.app.services.redis_service import (
     get_pending_approval_by_sa,
     save_approval_queue_entry,
     update_approval_queue_entry,
+    save_rbac_state,
 )
 
 logger = logging.getLogger(__name__)
@@ -105,19 +106,19 @@ async def run_drift_scan(redis: Redis, k8s: KubernetesService) -> list[dict[str,
     Steps:
     1. Get current live RBAC state from K8s API
     2. Get the ACTIVE baseline from Redis (via baseline_service)
-    3. If no active baseline exists -> create one from live state as initial ACTIVE
+    3. If no active baseline exists -> retain observed state without adoption
     4. Compare canonical hashes
     5. If match -> return empty list (no drift)
     6. If mismatch:
        a. Compute DeepDiff(active_state, live_state)
        b. Classify risk tier
-       c. Run LLM analysis on the diff
+       c. Record observational history (analysis uses the dedicated worker)
        d. Handle Lazy Grouping / update or create approval queue entry
        e. Create PENDING_APPROVAL baseline entry
        f. Return list of drift findings
     """
     try:
-        live_state = k8s.get_rbac_state()
+        live_state = await asyncio.to_thread(k8s.get_rbac_state)
     except Exception as e:
         logger.error(f"Failed to fetch live RBAC state from K8s: {e}")
         return []
@@ -126,15 +127,8 @@ async def run_drift_scan(redis: Redis, k8s: KubernetesService) -> list[dict[str,
     active_baseline = await get_active_baseline(sa_key, redis)
 
     if not active_baseline or not active_baseline.get("rbac_state"):
-        logger.info("No active baseline found; seeding initial ACTIVE baseline from live cluster state.")
-        await create_baseline(
-            rbac_state=live_state,
-            sa_key=sa_key,
-            status="ACTIVE",
-            approved_by="system_init",
-            run_id="initial-seed",
-            redis=redis,
-        )
+        logger.info("No approved baseline; retaining observed state for initial analysis.")
+        await save_rbac_state("rbac:current", live_state, redis)
         return []
 
     live_hash = canonical_hash(live_state)
@@ -154,12 +148,9 @@ async def run_drift_scan(redis: Redis, k8s: KubernetesService) -> list[dict[str,
     # 6.b Classify risk tier
     risk_tier = classify_drift_risk(diff, active_state, live_state)
 
-    # 6.c Run LLM analysis on the diff
-    try:
-        llm_analysis = analyse_document(diff)
-    except Exception as err:
-        logger.warning(f"LLM summarizer failed on drift diff: {err}")
-        llm_analysis = f"Automated analysis unavailable: {err}"
+    # Inference belongs to the dedicated scoped analysis worker. The legacy
+    # history remains observational and cannot delay audit ingestion.
+    llm_analysis = "Observed drift; use the authenticated Analysis and review workspace for evidence-backed analysis."
 
     # 6.d Lazy Grouping (Version Chain Collapse)
     pending_entry = await get_pending_approval_by_sa(sa_key, redis)
@@ -185,10 +176,7 @@ async def run_drift_scan(redis: Redis, k8s: KubernetesService) -> list[dict[str,
         net_diff = _sanitize_diff(DeepDiff(original_state, live_state, ignore_order=True))
         net_risk = classify_drift_risk(net_diff, original_state, live_state)
 
-        try:
-            net_llm = analyse_document(net_diff)
-        except Exception:
-            net_llm = llm_analysis
+        net_llm = llm_analysis
 
         new_baseline = await create_baseline(
             rbac_state=live_state,
@@ -317,7 +305,7 @@ async def propose_llm_policy(
     Caps retries at 3 attempts per Section 6.4.
     """
     input_hash = canonical_hash(input_state)
-    fresh_state = k8s.get_rbac_state()
+    fresh_state = await asyncio.to_thread(k8s.get_rbac_state)
     fresh_hash = canonical_hash(fresh_state)
 
     if fresh_hash != input_hash:

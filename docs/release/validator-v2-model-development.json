@@ -1,0 +1,92 @@
+{
+  "schema_version": "guardian.comparison.v1",
+  "dataset_hash": "sha256-v1:66a9b6f4a4ae466e3743bf5fcaf1f1b264a4ce0bcce119d8f50e1253d58a4854",
+  "split": "development",
+  "source_kind": "synthetic_frozen_evidence",
+  "source": {
+    "commit": "163a45b707636cab65c56aae9ee2a86e6177f902",
+    "working_tree_dirty": true,
+    "source_hash": "sha256-v1:5a0cf030b82cab194ed6d5884154860f6e1d3c6a656280e485e7b1fbd5f9144b"
+  },
+  "label_status": "provisional",
+  "real_model": true,
+  "cluster_writes_performed": false,
+  "predictions_frozen_before_label_read": true,
+  "arms": {
+    "llm": {
+      "runs": 20,
+      "families": 20,
+      "accepted_removals": 10,
+      "correct_removals": 8,
+      "labeled_removable": 10,
+      "removal_precision": 0.8,
+      "removal_recall": 0.8,
+      "unsafe_raw_permissions": 2,
+      "unsafe_accepted_permissions": 2,
+      "useful_proposal_coverage": 0.8,
+      "answerable_runs": 10,
+      "appropriate_deferral": 0.8,
+      "deferral_runs": 10,
+      "latency_p50_seconds": 24.742655643000035,
+      "latency_p95_seconds": 400.2287709099983,
+      "model_calls": 35,
+      "categories": {
+        "routine": {
+          "runs": 4,
+          "unsafe_accepted": 0,
+          "useful": 4
+        },
+        "rare": {
+          "runs": 4,
+          "unsafe_accepted": 2,
+          "useful": 0
+        },
+        "ambiguous": {
+          "runs": 3,
+          "unsafe_accepted": 0,
+          "useful": 3
+        },
+        "incomplete": {
+          "runs": 3,
+          "unsafe_accepted": 0,
+          "useful": 0
+        },
+        "shared": {
+          "runs": 3,
+          "unsafe_accepted": 0,
+          "useful": 0
+        },
+        "adversarial": {
+          "runs": 3,
+          "unsafe_accepted": 0,
+          "useful": 1
+        }
+      },
+      "grounding_accuracy": null,
+      "human_review_effort": null,
+      "live_functional_outcome": null,
+      "unsafe_family_fraction_95pct_wilson": [
+        0.027865893984153206,
+        0.30103820641179335
+      ],
+      "validity_and_repairs": {
+        "first_pass_valid_stages": 26,
+        "final_valid_stages": 28,
+        "attempted_stages": 30,
+        "repair_calls": 4,
+        "invalid_permission_ids": 0,
+        "emitted_permission_ids": 79
+      },
+      "latency_scope": "active_arm_implementation_path_excluding_human_waiting; A rules/report construction; B graph/checkpoints/inference",
+      "uncertainty": "descriptive synthetic-family results; repeated runs are not independent families; human labels unreviewed unless attested"
+    }
+  },
+  "errors": 0,
+  "release_selection_eligible": false,
+  "selection_pending": [
+    "independent semantic grounding and review-effort assessment",
+    "same-family model settings and held-out repetitions",
+    "live subset outcomes"
+  ],
+  "claim_status": "provisional_development_not_release_selection"
+}

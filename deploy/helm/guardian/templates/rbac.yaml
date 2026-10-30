@@ -1,0 +1,72 @@
+{{- range $component := list "backend" "collector" "worker" "dashboard" }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: {{ $.Release.Name }}-{{ $component }}}
+automountServiceAccountToken: {{ or (eq $component "backend") (eq $component "collector") }}
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: {{ .Release.Namespace }}-{{ .Release.Name }}-reader}
+rules:
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, clusterroles, rolebindings, clusterrolebindings]
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [pods, serviceaccounts]
+    verbs: [get, list]
+  - apiGroups: [authorization.k8s.io]
+    resources: [subjectaccessreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: {{ .Release.Namespace }}-{{ .Release.Name }}-reader}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ .Release.Namespace }}-{{ .Release.Name }}-reader}
+subjects:
+  - {kind: ServiceAccount, name: {{ .Release.Name }}-backend, namespace: {{ .Release.Namespace }}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: {{ .Release.Namespace }}-{{ .Release.Name }}-probe}
+rules:
+  - nonResourceURLs: [/version]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: {{ .Release.Namespace }}-{{ .Release.Name }}-probe}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ .Release.Namespace }}-{{ .Release.Name }}-probe}
+subjects:
+  - {kind: ServiceAccount, name: {{ .Release.Name }}-collector, namespace: {{ .Release.Namespace }}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: {{ .Release.Name }}-inventory, namespace: {{ .Values.targetNamespace }}}
+rules:
+  - apiGroups: [""]
+    resources: [replicationcontrollers]
+    verbs: [get, list]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets, statefulsets, daemonsets]
+    verbs: [get, list]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list]
+  - apiGroups: [""]
+    resources: [pods/proxy]
+    verbs: [get, create]
+  {{- if .Values.execution.enabled }}
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles]
+    resourceNames: [{{ .Values.targetRole | quote }}]
+    verbs: [get, patch, escalate]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: {{ .Release.Name }}-inventory, namespace: {{ .Values.targetNamespace }}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ .Release.Name }}-inventory}
+subjects:
+  - {kind: ServiceAccount, name: {{ .Release.Name }}-backend, namespace: {{ .Release.Namespace }}}

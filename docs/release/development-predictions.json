@@ -1,0 +1,342 @@
+[
+  {
+    "case_id": "case-001",
+    "input_hash": "sha256-v1:8b184e2b060ad41656a29b2db80e36f632aba2a8411b89356c1e37c06d722894",
+    "arm": "llm",
+    "repeat": 1,
+    "status": "PENDING_REVIEW",
+    "accepted_removals": [
+      [
+        "",
+        "secrets",
+        "get"
+      ]
+    ],
+    "raw_removals": [
+      [
+        "",
+        "secrets",
+        "get"
+      ]
+    ],
+    "model_calls": 2,
+    "duration_seconds": 23.011008082001354
+  },
+  {
+    "case_id": "case-002",
+    "input_hash": "sha256-v1:f3231f83a7a2ff4baa1cc4908f76bd4554f31f1a8fca1d048cff81a60c5e3d9d",
+    "arm": "llm",
+    "repeat": 1,
+    "status": "PENDING_REVIEW",
+    "accepted_removals": [
+      [
+        "",
+        "secrets",
+        "get"
+      ]
+    ],
+    "raw_removals": [
+      [
+        "",
+        "secrets",
+        "get"
+      ]
+    ],
+    "model_calls": 2,
+    "duration_seconds": 19.989204991998122
+  },
+  {
+    "case_id": "case-003",
+    "input_hash": "sha256-v1:92692c6b976cbe7288f15fada00651d43b657be945ab064e3e80db11426213bd",
+    "arm": "llm",
+    "repeat": 1,
+    "status": "PENDING_REVIEW",
+    "accepted_removals": [
+      [
+        "",
+        "secrets",
+        "get"
+      ]
+    ],
+    "raw_removals": [
+      [
+        "",
+        "secrets",
+        "get"
+      ]
+    ],
+    "model_calls": 2,
+    "duration_seconds": 19.122121239997796
+  },
+  {
+    "case_id": "case-004",
+    "input_hash": "sha256-v1:ea79ecc58d53770da8ea902c55472a9c69819ed3b3756925341b6ca7472e889d",
+    "arm": "llm",
+    "repeat": 1,
+    "status": "PENDING_REVIEW",
+    "accepted_removals": [
+      [
+        "",
+        "secrets",
+        "get"
+      ]
+    ],
+    "raw_removals": [
+      [
+        "",
+        "secrets",
+        "get"
+      ]
+    ],
+    "model_calls": 2,
+    "duration_seconds": 54.45420687300066
+  },
+  {
+    "case_id": "case-011",
+    "input_hash": "sha256-v1:11840f60c57d90efa47e42b46d087b2d267cd892c24037927fb826578f2f0b05",
+    "arm": "llm",
+    "repeat": 1,
+    "status": "BLOCKED",
+    "accepted_removals": [],
+    "raw_removals": [],
+    "model_calls": 2,
+    "duration_seconds": 33.60852629200235
+  },
+  {
+    "case_id": "case-012",
+    "input_hash": "sha256-v1:b2ef4890e7ac06dba7e160003ca3a0bad7aef73ca915d9b082bcd4a6725f60e3",
+    "arm": "llm",
+    "repeat": 1,
+    "status": "PENDING_REVIEW",
+    "accepted_removals": [
+      [
+        "",
+        "secrets",
+        "get"
+      ]
+    ],
+    "raw_removals": [
+      [
+        "",
+        "secrets",
+        "get"
+      ]
+    ],
+    "model_calls": 2,
+    "duration_seconds": 24.742655643000035
+  },
+  {
+    "case_id": "case-013",
+    "input_hash": "sha256-v1:6f964aec04301775b62545d63901f0b944d9ad57208ed12e19a445db6cf66fbe",
+    "arm": "llm",
+    "repeat": 1,
+    "status": "BLOCKED",
+    "accepted_removals": [],
+    "raw_removals": [],
+    "model_calls": 1,
+    "duration_seconds": 15.50679945599768
+  },
+  {
+    "case_id": "case-014",
+    "input_hash": "sha256-v1:f3938b0bf7eb6c9fab5292f13171631aee1b7fc555bede2b2820d73b711e741d",
+    "arm": "llm",
+    "repeat": 1,
+    "status": "PENDING_REVIEW",
+    "accepted_removals": [
+      [
+        "",
+        "secrets",
+        "get"
+      ]
+    ],
+    "raw_removals": [
+      [
+        "",
+        "secrets",
+        "get"
+      ]
+    ],
+    "model_calls": 2,
+    "duration_seconds": 25.064855125998292
+  },
+  {
+    "case_id": "case-021",
+    "input_hash": "sha256-v1:454dfee56fe0cb0aabfa7dae5418d657837220d035ac13b04c1423234db8a32e",
+    "arm": "llm",
+    "repeat": 1,
+    "status": "PENDING_REVIEW",
+    "accepted_removals": [
+      [
+        "",
+        "secrets",
+        "get"
+      ]
+    ],
+    "raw_removals": [
+      [
+        "",
+        "secrets",
+        "get"
+      ]
+    ],
+    "model_calls": 2,
+    "duration_seconds": 26.086439513001096
+  },
+  {
+    "case_id": "case-022",
+    "input_hash": "sha256-v1:9c53265824da628683f60710b1951a1dc22fec7a87711baa4b103d4a0776fe35",
+    "arm": "llm",
+    "repeat": 1,
+    "status": "PENDING_REVIEW",
+    "accepted_removals": [
+      [
+        "",
+        "secrets",
+        "get"
+      ]
+    ],
+    "raw_removals": [
+      [
+        "",
+        "secrets",
+        "get"
+      ]
+    ],
+    "model_calls": 2,
+    "duration_seconds": 24.917759380998177
+  },
+  {
+    "case_id": "case-023",
+    "input_hash": "sha256-v1:bcc7c6dd44113f20c84c50ec73bc8f0c2ea70a33315a67cd75abc0ee1c9f5537",
+    "arm": "llm",
+    "repeat": 1,
+    "status": "PENDING_REVIEW",
+    "accepted_removals": [
+      [
+        "",
+        "secrets",
+        "get"
+      ]
+    ],
+    "raw_removals": [
+      [
+        "",
+        "secrets",
+        "get"
+      ]
+    ],
+    "model_calls": 2,
+    "duration_seconds": 25.14183417300228
+  },
+  {
+    "case_id": "case-031",
+    "input_hash": "sha256-v1:01d79d90131c274037384027ee874fec634703f0b1a5f5c0ef638b272cbaa1e7",
+    "arm": "llm",
+    "repeat": 1,
+    "status": "BLOCKED",
+    "accepted_removals": [],
+    "raw_removals": [],
+    "model_calls": 1,
+    "duration_seconds": 13.417622315002518
+  },
+  {
+    "case_id": "case-032",
+    "input_hash": "sha256-v1:b7584b69b415a53a1977ae9a708218abb768d8c6e42f2193225676a33b096e2b",
+    "arm": "llm",
+    "repeat": 1,
+    "status": "BLOCKED",
+    "accepted_removals": [],
+    "raw_removals": [],
+    "model_calls": 1,
+    "duration_seconds": 12.133878264001396
+  },
+  {
+    "case_id": "case-033",
+    "input_hash": "sha256-v1:74b1e9b80793d641c037c1ad3ef3d271ee4450b46457d162c634e64b7a163db4",
+    "arm": "llm",
+    "repeat": 1,
+    "status": "BLOCKED",
+    "accepted_removals": [],
+    "raw_removals": [],
+    "model_calls": 1,
+    "duration_seconds": 15.659730794999632
+  },
+  {
+    "case_id": "case-041",
+    "input_hash": "sha256-v1:06d20aa92b73bbb237d302d23f646e019c44b2fc759e22b754bc4500569022c9",
+    "arm": "llm",
+    "repeat": 1,
+    "status": "BLOCKED",
+    "accepted_removals": [],
+    "raw_removals": [],
+    "model_calls": 1,
+    "duration_seconds": 13.264423873999476
+  },
+  {
+    "case_id": "case-042",
+    "input_hash": "sha256-v1:e7668568104f08b104af8f535ed0286dde90c3e1c6f2aa6f2bd5a165a8275d27",
+    "arm": "llm",
+    "repeat": 1,
+    "status": "BLOCKED",
+    "accepted_removals": [],
+    "raw_removals": [],
+    "model_calls": 1,
+    "duration_seconds": 14.305307750000793
+  },
+  {
+    "case_id": "case-043",
+    "input_hash": "sha256-v1:c72dfc5c7af330ff4295c7658ff7639184166b3c274ff2b06a2061bc428da4a9",
+    "arm": "llm",
+    "repeat": 1,
+    "status": "BLOCKED",
+    "accepted_removals": [],
+    "raw_removals": [],
+    "model_calls": 2,
+    "duration_seconds": 299.2026174950006
+  },
+  {
+    "case_id": "case-051",
+    "input_hash": "sha256-v1:f4450f93863d5c0efb1da914069bd61ce2644768fb3f86aa6ef8229651366425",
+    "arm": "llm",
+    "repeat": 1,
+    "status": "BLOCKED",
+    "accepted_removals": [],
+    "raw_removals": [],
+    "model_calls": 2,
+    "duration_seconds": 400.2287709099983
+  },
+  {
+    "case_id": "case-052",
+    "input_hash": "sha256-v1:7436b926f7ff11986e5eced80a39b61e6bcee2041a4b0254c4c68fa25c19e33a",
+    "arm": "llm",
+    "repeat": 1,
+    "status": "BLOCKED",
+    "accepted_removals": [],
+    "raw_removals": [],
+    "model_calls": 2,
+    "duration_seconds": 402.4292666649999
+  },
+  {
+    "case_id": "case-053",
+    "input_hash": "sha256-v1:fddb62716c7d3395d59156a0cecb580f200d32e91b0d8ec7f83acf6dc235ddba",
+    "arm": "llm",
+    "repeat": 1,
+    "status": "PENDING_REVIEW",
+    "accepted_removals": [
+      [
+        "",
+        "secrets",
+        "get"
+      ]
+    ],
+    "raw_removals": [
+      [
+        "",
+        "secrets",
+        "get"
+      ]
+    ],
+    "model_calls": 3,
+    "duration_seconds": 303.2453626960014
+  }
+]

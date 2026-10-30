@@ -34,6 +34,22 @@ def rule_dicts(target: Target) -> list[dict]:
     return [r.model_dump(exclude_defaults=True) for r in target.rules]
 
 
+def unresolved_documented_workflow(context):
+    """Conservative English workflow cues, shared by both arms and the backend.
+
+Ordinary documentation is not an authority grant. A potentially relevant rare
+cycle needs corroborated behavior/structured evidence before executable removal.
+This rule is intentionally not a general natural-language dependency proof.
+"""
+    if context is None:return False
+    for document in context.optional_documents:
+        text=document.lower()
+        periodic=any(word in text for word in ('monthly','quarterly','annual','infrequent','overnight','year-end','rotation','recovery','restore','emergency','scheduled'))
+        workflow=any(word in text for word in ('workflow','routine','fetches','requests','exercise','backup','job'))
+        if periodic and workflow:return True
+    return False
+
+
 def global_gates(e: EvidenceBundle, now: datetime) -> list[Gate]:
     def gate(name, reasons):
         return Gate(gate_id=name, result="fail" if reasons else "pass", reasons=sorted(set(reasons)))
@@ -75,6 +91,8 @@ def global_gates(e: EvidenceBundle, now: datetime) -> list[Gate]:
         reasons.append("stale_source")
     elif not 0 <= (now - e.usage.processed_through).total_seconds() <= e.policy.maximum_source_lag_seconds:
         reasons.append("stale_source")
+    if unresolved_documented_workflow(c):
+        reasons.append("documented_rare_workflow_requires_validation")
     if c and c.collected_at > now:
         reasons.append("future_context")
     freshness = gate("source_freshness", reasons)

@@ -1,0 +1,66 @@
+{
+  "schema_version": "guardian.comparison.v1",
+  "dataset_hash": "sha256-v1:66a9b6f4a4ae466e3743bf5fcaf1f1b264a4ce0bcce119d8f50e1253d58a4854",
+  "split": "development",
+  "source_kind": "synthetic_frozen_evidence",
+  "source": {
+    "commit": "9d82914ed48c1ed6b66d4deca840a9d2d85ca4ee",
+    "working_tree_dirty": true,
+    "source_hash": "sha256-v1:9fd2aac00cf6018523d12768692569592e96b262438f3d50fcf520c9b47816bf"
+  },
+  "label_status": "provisional",
+  "real_model": true,
+  "cluster_writes_performed": false,
+  "predictions_frozen_before_label_read": true,
+  "arms": {
+    "llm": {
+      "runs": 2,
+      "families": 2,
+      "accepted_removals": 0,
+      "correct_removals": 0,
+      "labeled_removable": 0,
+      "removal_precision": null,
+      "removal_recall": null,
+      "unsafe_raw_permissions": 0,
+      "unsafe_accepted_permissions": 0,
+      "useful_proposal_coverage": null,
+      "answerable_runs": 0,
+      "appropriate_deferral": 1.0,
+      "deferral_runs": 2,
+      "latency_p50_seconds": 12.986069544997008,
+      "latency_p95_seconds": 16.532380794000346,
+      "model_calls": 2,
+      "categories": {
+        "rare": {
+          "runs": 2,
+          "unsafe_accepted": 0,
+          "useful": 0
+        }
+      },
+      "grounding_accuracy": null,
+      "human_review_effort": null,
+      "live_functional_outcome": null,
+      "unsafe_family_fraction_95pct_wilson": [
+        0,
+        0.6576280471103807
+      ],
+      "validity_and_repairs": {
+        "first_pass_valid_stages": 2,
+        "final_valid_stages": 2,
+        "attempted_stages": 2,
+        "repair_calls": 0,
+        "invalid_permission_ids": 0,
+        "emitted_permission_ids": 6
+      },
+      "latency_scope": "active_arm_implementation_path_excluding_human_waiting; A rules/report construction; B graph/checkpoints/inference",
+      "uncertainty": "descriptive synthetic-family results; repeated runs are not independent families; human labels unreviewed unless attested"
+    }
+  },
+  "errors": 0,
+  "release_selection_eligible": false,
+  "selection_pending": [
+    "independent semantic grounding and review-effort assessment",
+    "same-family model settings and held-out repetitions",
+    "live subset outcomes"
+  ]
+}

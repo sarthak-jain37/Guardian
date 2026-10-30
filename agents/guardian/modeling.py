@@ -19,7 +19,7 @@ class ModelConfig(Contract):
     schema_version: Literal["guardian.model-config.v2"] = "guardian.model-config.v2"
     profile: Literal["test", "dev-laptop", "lab"] = "test"
     profile_version: Literal["guardian.model-profile.v1"] = "guardian.model-profile.v1"
-    provider: Literal["scripted", "llama-cpp", "vllm"] = "scripted"
+    provider: Literal["scripted", "llama-cpp", "vllm", "ollama"] = "scripted"
     model_name: ID = "scripted-test"
     model_revision: ID | None = None
     model_path: str | None = Field(default=None, max_length=4096)
@@ -52,11 +52,11 @@ class ModelConfig(Contract):
             raise ValueError("lab profile requires an explicit requested model revision")
         if self.provider == "llama-cpp" and (not self.model_path or self.endpoint is not None):
             raise ValueError("llama-cpp requires a model path and no endpoint")
-        if self.provider == "vllm":
+        if self.provider in ("vllm", "ollama"):
             parsed = urlsplit(self.endpoint or "")
             if (parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password
                     or parsed.query or parsed.fragment):
-                raise ValueError("vllm requires a configured HTTP endpoint without embedded credentials")
+                raise ValueError("remote provider requires an HTTP endpoint without embedded credentials")
             if self.model_path is not None:
                 raise ValueError("remote inference cannot use a local model path")
         elif self.endpoint is not None or self.api_key_env is not None:
@@ -104,6 +104,26 @@ def model_config(client):
     return getattr(client, "config", ModelConfig())
 
 
+PROMPT_SELECTION_VERSION = "guardian.prompt-selection.v1"
+
+
+def prompt_facts(facts,snapshot_id):
+    """Bound citation menus without changing facts or full-evidence validation."""
+    selected=[]
+    for fact in facts:
+        refs=fact['evidence_ids']
+        def priority(ref):
+            if ref.startswith(('usage-','request-','inventory:')):return 0
+            if ref.startswith('audit:'):return 1
+            return 2
+        menu=sorted(refs,key=lambda ref:(priority(ref),ref))[:8]
+        value={**fact,'evidence_ids':menu}
+        if len(menu)<len(refs):value.update(omitted_evidence_id_count=len(refs)-len(menu),
+            omitted_detail_ref='snapshot:'+snapshot_id+'/permission:'+fact['permission_id'])
+        selected.append(value)
+    return selected
+
+
 def scoped_schema(schema, payload):
     schema = deepcopy(schema)
     menu = payload.get("allowed_lookups")
@@ -113,6 +133,30 @@ def scoped_schema(schema, payload):
              "required": list(entry), "additionalProperties": False} for entry in menu]}
     if payload.get("remaining_lookup_rounds") == 0 and "context_requests" in schema.get("properties", {}):
         schema["properties"]["context_requests"]["maxItems"] = 0
+    # Reflect the *existing* domain validator's allowed decisions in decoding.
+    # This supplies no expected answer: an eligible permission can still be
+    # retained, deferred or investigated. Ineligible removal is never a choice.
+    facts = payload.get("facts", [])
+    definition = "PermissionAssessment" if "PermissionAssessment" in schema.get("$defs", {}) else "PlanDecision"
+    field = "permission_assessments" if definition == "PermissionAssessment" else "decisions"
+    if facts and definition in schema.get("$defs", {}):
+        suggested = {a["permission_id"] for a in payload.get("investigation", {}).get("permission_assessments", [])
+                     if a["recommendation"] == "propose_remove"}
+        entries = []
+        for fact in facts:
+            entry = deepcopy(schema["$defs"][definition])
+            properties = entry["properties"]
+            properties["permission_id"] = {"type": "string", "const": fact["permission_id"]}
+            properties["evidence_ids"]["items"] = {"type": "string", "enum": fact["evidence_ids"]}
+            if definition == "PermissionAssessment" and not fact.get("eligible", False):
+                properties["recommendation"]["enum"] = ["retain", "request_context", "human_investigation"]
+            elif definition == "PlanDecision" and (not fact.get("eligible", False) or fact["permission_id"] not in suggested):
+                properties["action"]["enum"] = ["retain"]
+            entries.append(entry)
+        schema["properties"][field] = {"type": "array", "prefixItems": entries,
+                                      "minItems": len(entries), "maxItems": len(entries)}
+    if "target_id" in schema.get("properties", {}) and payload.get("target_uid"):
+        schema["properties"]["target_id"] = {"type": "string", "const": payload["target_uid"]}
     return schema
 
 
@@ -122,7 +166,7 @@ def model_input(stage, payload, schema, client):
     record = {"input_hash": "sha256:" + hashlib.sha256(encoded).hexdigest(), "bytes": len(encoded)}
     if len(encoded) > model_config(client).max_input_bytes:
         return {**record, "omitted_reason": "input_too_large"}
-    return {**record, **value}
+    return {**record, "selection_version": PROMPT_SELECTION_VERSION, **value}
 
 
 def call_model(client, stage, payload, schema, timeout_seconds):

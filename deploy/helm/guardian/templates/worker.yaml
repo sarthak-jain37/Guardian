@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: {{ .Release.Name }}-worker}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: {{ .Release.Name }}-worker}
+  template:
+    metadata:
+      labels: {app: {{ .Release.Name }}-worker, guardian-component: worker}
+    spec:
+      serviceAccountName: {{ .Release.Name }}-worker
+      automountServiceAccountToken: false
+      securityContext: {{- include "guardian.security" . | nindent 8 }}
+      nodeSelector: {{ toYaml .Values.nodeSelector | nindent 8 }}
+      containers:
+        - name: worker
+          image: {{ include "guardian.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- include "guardian.containerSecurity" . | nindent 12 }}
+          resources: {{ toYaml .Values.resources.worker | nindent 12 }}
+          command: [python, -m, agents.guardian.service_worker]
+          args: [--backend, "http://{{ .Release.Name }}-backend:8000", --token-file, /etc/guardian/worker/worker.token, --cluster, {{ .Values.clusterId | quote }}, --namespace, {{ .Values.targetNamespace | quote }}, --directory, /worker]
+          volumeMounts:
+            - {name: worker, mountPath: /worker}
+            - {name: token, mountPath: /etc/guardian/worker, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: worker, persistentVolumeClaim: {claimName: {{ .Release.Name }}-worker}}
+        - {name: token, secret: {secretName: {{ .Values.secrets.worker }}, defaultMode: 0440}}
+        - {name: tmp, emptyDir: {sizeLimit: 128Mi}}
