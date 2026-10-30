@@ -91,3 +91,19 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertFalse(app.exception)
             self.assertTrue(any('was not applied' in m.value and 'execution_start_deadline_expired' in m.value for m in app.error))
             self.assertEqual(self.driver.applies,[])
+
+    def test_governed_context_links_to_queued_successor_analysis(self):
+        run,review=self.prepared()
+        with patch('frontend.review_client.requests.request',side_effect=self.request):
+            app=self.open()
+            next(s for s in app.selectbox if s.label=='Governed review action').select('request_context')
+            next(t for t in app.text_area if t.label=='Governed review note').set_value('Please recheck the observed pod reads.')
+            self.button(app,'Record governed decision').click().run()
+            self.execution.execute_next()
+            self.button(app,'Refresh reports').click().run()
+            successor=self.execution.review_detail(review['proposal_id'],self.human)['context_successor_run_id']
+            self.assertIsNotNone(successor)
+            self.button(app,'Open revised analysis').click().run()
+            self.assertFalse(app.exception);self.assertFalse(app.error)
+            self.assertTrue(any(successor in c.value for c in app.caption))
+            self.assertEqual(self.driver.applies,[])
